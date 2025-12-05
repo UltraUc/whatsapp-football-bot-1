@@ -15,12 +15,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ============ Socket.IO ============
 function initializeSocket() {
+    console.log('🔌 Initializing socket connection...');
     socket = io();
 
     socket.on('connect', () => {
         console.log('✅ Connected to server');
+        console.log('📡 Socket ID:', socket.id);
         updateConnectionStatus(true);
         addLog('✅ התחבר לשרת בהצלחה');
+    });
+
+    socket.on('connect_error', (error) => {
+        console.error('❌ Connection error:', error);
+        addLog('❌ שגיאת חיבור: ' + error.message, 'error');
     });
 
     socket.on('disconnect', () => {
@@ -162,6 +169,7 @@ async function loadInitialData() {
 }
 
 async function loadGroups(forceRefresh = false) {
+    console.log('📋 loadGroups called, forceRefresh:', forceRefresh);
     const loadingEl = document.getElementById('groupsLoading');
     const listEl = document.getElementById('groupsList');
 
@@ -170,9 +178,13 @@ async function loadGroups(forceRefresh = false) {
 
     try {
         const endpoint = forceRefresh ? '/api/groups/refresh' : '/api/groups';
+        console.log('📡 Fetching from:', endpoint);
+
         const response = forceRefresh
             ? await fetch(endpoint, { method: 'POST' })
             : await fetch(endpoint);
+
+        console.log('📥 Response status:', response.status);
 
         if (!response.ok) {
             throw new Error('Failed to load groups');
@@ -180,6 +192,8 @@ async function loadGroups(forceRefresh = false) {
 
         const data = await response.json();
         groups = forceRefresh ? data.groups : data;
+
+        console.log('📊 Loaded groups:', groups.length, groups);
 
         renderGroups();
         addLog(`✅ נטענו ${groups.length} קבוצות`);
