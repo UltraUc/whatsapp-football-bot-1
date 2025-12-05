@@ -89,8 +89,18 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--single-process',
-            '--disable-gpu'
-        ]
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-software-rasterizer',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding'
+        ],
+        timeout: 60000
+    },
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
     }
 });
 
@@ -752,14 +762,17 @@ client.on('disconnected', (reason) => {
 
 // ============ הפעלת השרתים ============
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0'; // Listen on all interfaces
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
     console.log('╔════════════════════════════════════════╗');
     console.log('║   🎯 WhatsApp Football Bot Dashboard   ║');
     console.log('╚════════════════════════════════════════╝');
     console.log('');
-    console.log(`📊 דשבורד: http://localhost:${PORT}`);
+    console.log(`📊 דשבורד מקומי: http://localhost:${PORT}`);
+    console.log(`🌐 לגישה חיצונית, השתמש ב-IP החיצוני של השרת על פורט ${PORT}`);
     console.log('🤖 הבוט מתחיל...\n');
 });
 
 client.initialize();
+
