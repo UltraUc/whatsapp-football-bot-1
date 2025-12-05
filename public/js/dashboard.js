@@ -245,11 +245,19 @@ function renderGroups() {
 
     listEl.innerHTML = groups.map(group => `
         <div class="group-item ${group.isSelected ? 'selected' : ''}" data-group-id="${group.id}">
-            <input type="checkbox" 
-                   class="group-checkbox" 
-                   ${group.isSelected ? 'checked' : ''} 
-                   onchange="toggleGroup('${group.id}')">
-            <span class="group-name">${group.name}</span>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
+                <input type="checkbox" 
+                       class="group-checkbox" 
+                       ${group.isSelected ? 'checked' : ''} 
+                       onchange="toggleGroup('${group.id}')">
+                <span class="group-name">${group.name}</span>
+            </div>
+            ${group.isSelected ? `
+                <button class="btn btn-secondary btn-sm" onclick="manageGroupMembers('${group.id}', '${group.name.replace(/'/g, "\\'")}')"
+                        style="padding: 0.25rem 0.5rem; font-size: 0.85rem;">
+                    👥 רשימת שחקנים
+                </button>
+            ` : ''}
         </div>
     `).join('');
 }
@@ -513,15 +521,208 @@ function displayQRCode(qrData) {
     qrCard.style.display = 'block';
     qrContainer.innerHTML = '';
 
-    QRCode.toCanvas(qrData, { width: 256, margin: 2 }, (error, canvas) => {
-        if (error) {
-            console.error('QR Code generation failed:', error);
-            qrContainer.innerHTML = '<p style="color: var(--danger);">שגיאה ביצירת QR code</p>';
-            return;
-        }
+    // Create canvas element
+    const canvas = document.createElement('canvas');
 
-        qrContainer.appendChild(canvas);
-    });
+    // Use the global QRCode object from the CDN
+    if (window.QRCode) {
+        window.QRCode.toCanvas(canvas, qrData, {
+            width: 256,
+            margin: 2,
+            color: {
+                dark: '#000000',
+                light: '#FFFFFF'
+            }
+        }, (error) => {
+            if (error) {
+                console.error('QR Code generation failed:', error);
+                qrContainer.innerHTML = '<p style="color: var(--danger);">שגיאה ביצירת QR code</p>';
+                return;
+            }
+            qrContainer.appendChild(canvas);
+        });
+    } else {
+        console.error('QRCode library not loaded');
+        qrContainer.innerHTML = '<p style="color: var(--danger);">ספריית QR code לא נטענה</p>';
+    }
+}
+
+// ============ Activity Log ============
+function addLog(message, type = 'info') {
+    const logContainer = document.getElementById('activityLog');
+    const time = new Date().toLocaleTimeString('he-IL');
+
+    const logItem = document.createElement('div');
+    logItem.className = 'log-item';
+    if (type === 'error') {
+        logItem.style.borderRightColor = 'var(--danger)';
+    }
+}
+
+// ============ Group Member Management ============
+let currentGroupId = null;
+let currentGroupName = null;
+let currentGroupMembers = [];
+let groupMembersChanged = false;
+
+async function manageGroupMembers(groupId, groupName) {
+    currentGroupId = groupId;
+    currentGroupName = groupName;
+    groupMembersChanged = false;
+
+    // Load current members for this group
+    try {
+        const response = await fetch(`/api/groups/${encodeURIComponent(groupId)}/members`);
+        const data = await response.json();
+
+        currentGroupMembers = data.members || [...config.membersToAdd]; // Copy global list if no specific list
+
+        // Show modal
+        showGroupMembersModal(groupName, data.useGlobal);
+    } catch (error) {
+        console.error('Failed to load group members:', error);
+        addLog('❌ שגיאה בטעינת רשימת שחקנים לקבוצה', 'error');
+    }
+}
+
+function showGroupMembersModal(groupName, useGlobal) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('groupMembersModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'groupMembersModal';
+        modal.className = 'modal';
+        document.body.appendChild(modal);
+    }
+
+    const globalBadge = useGlobal ? '<span style="color: var(--warning); font-size: 0.9rem;">📋 משתמש ברשימה גלובלית</span>' : '';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>👥 ניהול שחקנים - ${groupName}</h3>
+                <button class="modal-close" onclick="closeGroupMembersModal()">×</button>
+            </div>
+            <div class="modal-body">
+                ${globalBadge}
+                <div style="margin: 1rem 0;">
+                    <button class="btn btn-secondary" onclick="useGlobalList()" style="width: 100%;">
+                        🌐 השתמש ברשימה גלובלית
+                    </button>
+                </div>
+                <div style="margin: 1rem 0;">
+                    <button class="btn btn-primary" id="addGroupMemberBtn" onclick="addGroupMember()">
+                        ➕ הוסף שחקן
+                    </button>
+                </div>
+                <div id="groupMembersList" class="members-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeGroupMembersModal()">ביטול</button>
+                <button class="btn btn-primary" onclick="saveGroupMembers()">💾 שמור</button>
+            </div>
+        </div>
+    `;
+
+    modal.style.display = 'flex';
+    renderGroupMembers();
+}
+
+function closeGroupMembersModal() {
+    const modal = document.getElementById('groupMembersModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    currentGroupId = null;
+    currentGroupName = null;
+    currentGroupMembers = [];
+    groupMembersChanged = false;
+}
+
+function renderGroupMembers() {
+    const listEl = document.getElementById('groupMembersList');
+    if (!listEl) return;
+
+    if (!currentGroupMembers || currentGroupMembers.length === 0) {
+        listEl.innerHTML = '<p style="text-align: center; color: var(--text-muted);">לא נוספו שחקנים. לחץ על "הוסף שחקן" כדי להתחיל.</p>';
+        return;
+    }
+
+    listEl.innerHTML = currentGroupMembers.map((member, index) => `
+        <div class="member-item">
+            <div class="member-order">${index + 1}</div>
+            <input type="text" 
+                   class="member-name" 
+                   value="${member}" 
+                   onchange="updateGroupMemberName(${index}, this.value)">
+            <div class="member-actions">
+                <button class="btn btn-icon btn-danger" onclick="removeGroupMember(${index})">🗑️</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addGroupMember() {
+    currentGroupMembers.push('שחקן חדש');
+    groupMembersChanged = true;
+    renderGroupMembers();
+}
+
+function removeGroupMember(index) {
+    if (confirm('האם אתה בטוח שברצונך להסיר את השחקן הזה?')) {
+        currentGroupMembers.splice(index, 1);
+        groupMembersChanged = true;
+        renderGroupMembers();
+    }
+}
+
+function updateGroupMemberName(index, newName) {
+    currentGroupMembers[index] = newName;
+    groupMembersChanged = true;
+}
+
+async function saveGroupMembers() {
+    if (!currentGroupId) return;
+
+    try {
+        const response = await fetch(`/api/groups/${encodeURIComponent(currentGroupId)}/members`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ members: currentGroupMembers })
+        });
+
+        if (!response.ok) throw new Error('Failed to save group members');
+
+        addLog(`✅ רשימת השחקנים נשמרה עבור ${currentGroupName}`);
+        closeGroupMembersModal();
+    } catch (error) {
+        console.error('Failed to save group members:', error);
+        addLog('❌ שגיאה בשמירת רשימת שחקנים לקבוצה', 'error');
+    }
+}
+
+async function useGlobalList() {
+    if (!currentGroupId) return;
+
+    if (!confirm('האם אתה בטוח שברצונך להשתמש ברשימה הגלובלית? רשימה ספציפית זו תימחק.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/groups/${encodeURIComponent(currentGroupId)}/members`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ members: null })
+        });
+
+        if (!response.ok) throw new Error('Failed to reset to global list');
+
+        addLog(`✅ ${currentGroupName} משתמש כעת ברשימה הגלובלית`);
+        closeGroupMembersModal();
+    } catch (error) {
+        console.error('Failed to reset to global list:', error);
+        addLog('❌ שגיאה באיפוס לרשימה גלובלית', 'error');
+    }
 }
 
 // ============ Activity Log ============
@@ -556,3 +757,10 @@ window.removeMember = removeMember;
 window.updateMemberName = updateMemberName;
 window.moveMember = moveMember;
 window.removeKeyword = removeKeyword;
+window.manageGroupMembers = manageGroupMembers;
+window.closeGroupMembersModal = closeGroupMembersModal;
+window.saveGroupMembers = saveGroupMembers;
+window.useGlobalList = useGlobalList;
+window.addGroupMember = addGroupMember;
+window.removeGroupMember = removeGroupMember;
+window.updateGroupMemberName = updateGroupMemberName;

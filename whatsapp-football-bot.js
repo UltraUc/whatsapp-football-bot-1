@@ -148,7 +148,7 @@ function parseList(text) {
             if (nameMatch) {
                 const slotNumber = parseInt(nameMatch[1]);
                 const name = nameMatch[2].trim();
-                
+
                 if (!inWaitlist) {
                     // רשימה ראשית (1-15)
                     if (slotNumber >= 1 && slotNumber <= 15 && name) {
@@ -164,10 +164,10 @@ function parseList(text) {
         }
     }
 
-    return { 
-        lines, 
-        emptySlots, 
-        waitlistSlots, 
+    return {
+        lines,
+        emptySlots,
+        waitlistSlots,
         waitlistStartIndex,
         existingNamesInMain,
         existingNamesInWaitlist
@@ -178,8 +178,9 @@ function parseList(text) {
  * ממלא את המקומות הפנויים עם השמות שהוגדרו
  * תומך בהוספה גם לרשימת ממתינים אם אין מקום ברשימה הראשית
  * בודק גם אם השמות כבר נמצאים ברשימה הראשית או ברשימת ממתינים
+ * תומך ברשימות שחקנים ספציפיות לכל קבוצה
  */
-function fillEmptySlots(text) {
+function fillEmptySlots(text, groupId = null) {
     const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist } = parseList(text);
 
     const allSlots = [...emptySlots];
@@ -202,28 +203,38 @@ function fillEmptySlots(text) {
         console.log(`✅ נמצאו ${waitlistSlotsCount} מקומות פנויים ברשימת ממתינים`);
     }
 
+    // בחירת רשימת השחקנים - ספציפית לקבוצה או גלובלית
+    let membersSource = config.membersToAdd;
+
+    if (groupId && config.groupMembers && config.groupMembers[groupId]) {
+        console.log(`📋 משתמש ברשימת שחקנים ספציפית לקבוצה`);
+        membersSource = config.groupMembers[groupId];
+    } else {
+        console.log(`📋 משתמש ברשימת שחקנים גלובלית`);
+    }
+
     // סינון שחקנים שכבר נמצאים ברשימה הראשית או ברשימת ממתינים
-    const membersToAdd = config.membersToAdd.filter(member => {
+    const membersToAdd = membersSource.filter(member => {
         // בודק אם השם כבר נמצא ברשימה הראשית
-        const inMain = existingNamesInMain.some(name => 
+        const inMain = existingNamesInMain.some(name =>
             name.trim().toLowerCase() === member.trim().toLowerCase()
         );
-        
+
         // בודק אם השם כבר נמצא ברשימת ממתינים (רק אם addToWaitlist מופעל)
-        const inWaitlist = config.addToWaitlist && existingNamesInWaitlist.some(name => 
+        const inWaitlist = config.addToWaitlist && existingNamesInWaitlist.some(name =>
             name.trim().toLowerCase() === member.trim().toLowerCase()
         );
-        
+
         if (inMain) {
             console.log(`ℹ️ השם "${member}" כבר נמצא ברשימה הראשית, מדלג`);
             return false;
         }
-        
+
         if (inWaitlist) {
             console.log(`ℹ️ השם "${member}" כבר נמצא ברשימת ממתינים, מדלג`);
             return false;
         }
-        
+
         return true;
     });
 
@@ -271,7 +282,7 @@ async function sendResponse(chat, message, result) {
         await new Promise(resolve => setTimeout(resolve, config.delayMs));
 
         console.log(`📤 מנסה לשלוח הודעה... (replyMode: ${config.replyMode})`);
-        
+
         if (config.replyMode) {
             await message.reply(result.updatedText);
             console.log('✅ נשלחה תגובה עם הרשימה המעודכנת');
@@ -432,6 +443,59 @@ app.post('/api/members', (req, res) => {
         res.json({ success: true, members });
     } catch (error) {
         console.error('❌ שגיאה ב-/api/members:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// קבלת רשימת חברים לקבוצה ספציפית
+app.get('/api/groups/:groupId/members', (req, res) => {
+    try {
+        const { groupId } = req.params;
+
+        if (!config.groupMembers) {
+            config.groupMembers = {};
+        }
+
+        const members = config.groupMembers[groupId] || null;
+        res.json({
+            groupId,
+            members,
+            useGlobal: !members // האם משתמש ברשימה הגלובלית
+        });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/groups/:groupId/members:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// עדכון רשימת חברים לקבוצה ספציפית
+app.post('/api/groups/:groupId/members', (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { members } = req.body;
+
+        if (members !== null && !Array.isArray(members)) {
+            return res.status(400).json({ error: 'members חייב להיות מערך או null' });
+        }
+
+        if (!config.groupMembers) {
+            config.groupMembers = {};
+        }
+
+        if (members === null) {
+            // מחיקת רשימה ספציפית - חזרה לגלובלית
+            delete config.groupMembers[groupId];
+        } else {
+            // הגדרת רשימה ספציפית
+            config.groupMembers[groupId] = members;
+        }
+
+        saveConfig(config);
+
+        io.emit('group-members-updated', { groupId, members });
+        res.json({ success: true, groupId, members });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/groups/:groupId/members:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -612,7 +676,7 @@ client.on('message', async (message) => {
             fullMessage: message.body
         });
 
-        const result = fillEmptySlots(message.body);
+        const result = fillEmptySlots(message.body, groupId);
         console.log(`📊 תוצאת עיבוד רשימה: ${result ? 'נמצאו מקומות ומולאו' : 'לא בוצע שינוי (אולי מלא או אין שמות להוספה)'}`);
 
         if (result) {
