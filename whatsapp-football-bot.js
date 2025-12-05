@@ -319,6 +319,7 @@ async function sendResponse(chat, message, result) {
 
 /**
  * טעינת קבוצות (עם מטמון)
+ * מגביל ל-50 קבוצות אחרונות, אבל שומר את הקבוצות הנבחרות
  */
 async function loadGroups(forceRefresh = false) {
     if (groupsCache && !forceRefresh) {
@@ -335,15 +336,35 @@ async function loadGroups(forceRefresh = false) {
         isLoadingGroups = true;
         console.log('🔄 טוען קבוצות מ-WhatsApp...');
         const chats = await client.getChats();
-        const groups = chats.filter(chat => chat.isGroup).map(group => ({
-            id: group.id._serialized,
-            name: group.name,
-            isSelected: config.selectedGroups.includes(group.id._serialized)
-        }));
 
-        groupsCache = groups;
-        console.log(`✅ נטענו ${groups.length} קבוצות והוכנסו למטמון`);
-        return groups;
+        // סנן רק קבוצות פעילות (לא ארכיון)
+        let allGroups = chats
+            .filter(chat => chat.isGroup && !chat.archived)
+            .map(group => ({
+                id: group.id._serialized,
+                name: group.name,
+                timestamp: group.timestamp || 0,
+                isSelected: config.selectedGroups.includes(group.id._serialized)
+            }));
+
+        console.log(`📊 נמצאו ${allGroups.length} קבוצות פעילות`);
+
+        // הפרד לנבחרות ולא נבחרות
+        const selectedGroups = allGroups.filter(g => g.isSelected);
+        const unselectedGroups = allGroups.filter(g => !g.isSelected);
+
+        // מיין את הלא נבחרות לפי זמן (האחרונות קודם)
+        unselectedGroups.sort((a, b) => b.timestamp - a.timestamp);
+
+        // קח עד 50 קבוצות: כל הנבחרות + הלא נבחרות האחרונות
+        const maxUnselected = Math.max(0, 50 - selectedGroups.length);
+        const limitedUnselected = unselectedGroups.slice(0, maxUnselected);
+
+        // שלב את שתי הרשימות
+        groupsCache = [...selectedGroups, ...limitedUnselected];
+
+        console.log(`✅ טעינה הושלמה: ${selectedGroups.length} נבחרות + ${limitedUnselected.length} אחרות = ${groupsCache.length} סה"כ`);
+        return groupsCache;
     } catch (error) {
         console.error('❌ שגיאה בטעינת קבוצות:', error);
         return null;
