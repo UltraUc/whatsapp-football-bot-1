@@ -1,0 +1,701 @@
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+
+// ============ הגדרות ============
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+// טעינת הגדרות מקובץ
+function loadConfig() {
+    try {
+        const data = fs.readFileSync(CONFIG_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.log('⚠️ לא נמצא קובץ הגדרות, יוצר ברירת מחדל...');
+        const defaultConfig = {
+            selectedGroups: [],
+            membersToAdd: ['שמך הפרטי', 'חבר 2', 'חבר 3'],
+            keywords: ['כדורגל', 'מגרש', 'יום'],
+            replyMode: true,
+            delayMs: 2000,
+            requireConfirmation: false,
+            addToWaitlist: true,
+            selfTestMode: false
+        };
+        saveConfig(defaultConfig);
+        return defaultConfig;
+    }
+}
+
+// שמירת הגדרות לקובץ
+function saveConfig(config) {
+    try {
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+        console.log('✅ ההגדרות נשמרו בהצלחה');
+        return true;
+    } catch (error) {
+        console.error('❌ שגיאה בשמירת ההגדרות:', error);
+        return false;
+    }
+}
+
+let config = loadConfig();
+
+// ============ Express Server ============
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ============ משתנים גלובליים ============
+let botStatus = {
+    isReady: false,
+    isAuthenticated: false,
+    qrCode: null,
+    connectedClients: 0
+};
+
+let groupsCache = null; // מטמון לקבוצות
+let isLoadingGroups = false;
+let pendingConfirmations = new Map(); // אחסון בקשות אישור ממתינות
+
+// ============ יצירת הבוט ============
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: './.wwebjs_auth'
+    }),
+    puppeteer: {
+        headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
+    }
+});
+
+// ============ פונקציות עזר ============
+
+/**
+ * בודק אם ההודעה היא רשימת כדורגל
+ */
+function isFootballList(message) {
+    const text = message.toLowerCase();
+    return config.keywords.some(keyword => text.includes(keyword.toLowerCase()));
+}
+
+/**
+ * מנתח את הרשימה ומוצא מקומות פנויים ברשימה הראשית וברשימת ממתינים
+ * גם מזהה שמות שכבר נמצאים ברשימה
+ */
+function parseList(text) {
+    const lines = text.split('\n');
+    const emptySlots = [];
+    const waitlistSlots = [];
+    const existingNamesInMain = []; // שמות שכבר נמצאים ברשימה הראשית
+    const existingNamesInWaitlist = []; // שמות שכבר נמצאים ברשימת ממתינים
+    let inWaitlist = false;
+    let waitlistStartIndex = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        // מזהה מתי מתחילה רשימת ממתינים
+        if (line.includes('ממתינים')) {
+            inWaitlist = true;
+            waitlistStartIndex = i;
+            continue;
+        }
+
+        // Regex גמיש יותר - מאפשר רווחים לפני/אחרי המספר והנקודה
+        // מטפל גם בתווים מיוחדים כמו zero-width space
+        const match = line.match(/^\s*(\d+)\s*\.\s*$/);
+        if (match) {
+            const slotNumber = parseInt(match[1]);
+
+            if (!inWaitlist) {
+                // רשימה ראשית (1-15)
+                if (slotNumber >= 1 && slotNumber <= 15) {
+                    emptySlots.push({ number: slotNumber, lineIndex: i, type: 'main' });
+                }
+            } else {
+                // רשימת ממתינים
+                waitlistSlots.push({ number: slotNumber, lineIndex: i, type: 'waitlist' });
+            }
+        } else {
+            // בודק אם יש שם בשורה (פורמט: מספר. שם)
+            const nameMatch = line.match(/^\s*(\d+)\s*\.\s*(.+)$/);
+            if (nameMatch) {
+                const slotNumber = parseInt(nameMatch[1]);
+                const name = nameMatch[2].trim();
+                
+                if (!inWaitlist) {
+                    // רשימה ראשית (1-15)
+                    if (slotNumber >= 1 && slotNumber <= 15 && name) {
+                        existingNamesInMain.push(name);
+                    }
+                } else {
+                    // רשימת ממתינים
+                    if (name) {
+                        existingNamesInWaitlist.push(name);
+                    }
+                }
+            }
+        }
+    }
+
+    return { 
+        lines, 
+        emptySlots, 
+        waitlistSlots, 
+        waitlistStartIndex,
+        existingNamesInMain,
+        existingNamesInWaitlist
+    };
+}
+
+/**
+ * ממלא את המקומות הפנויים עם השמות שהוגדרו
+ * תומך בהוספה גם לרשימת ממתינים אם אין מקום ברשימה הראשית
+ * בודק גם אם השמות כבר נמצאים ברשימה הראשית או ברשימת ממתינים
+ */
+function fillEmptySlots(text) {
+    const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist } = parseList(text);
+
+    const allSlots = [...emptySlots];
+
+    // אם מופעלת אופציית הוספה לממתינים, מוסיף גם את מקומות הממתינים
+    if (config.addToWaitlist && waitlistSlots.length > 0) {
+        allSlots.push(...waitlistSlots);
+    }
+
+    if (allSlots.length === 0) {
+        console.log('❌ אין מקומות פנויים ברשימה');
+        return null;
+    }
+
+    const mainSlotsCount = emptySlots.length;
+    const waitlistSlotsCount = waitlistSlots.length;
+
+    console.log(`✅ נמצאו ${mainSlotsCount} מקומות פנויים ברשימה הראשית`);
+    if (config.addToWaitlist && waitlistSlotsCount > 0) {
+        console.log(`✅ נמצאו ${waitlistSlotsCount} מקומות פנויים ברשימת ממתינים`);
+    }
+
+    // סינון שחקנים שכבר נמצאים ברשימה הראשית או ברשימת ממתינים
+    const membersToAdd = config.membersToAdd.filter(member => {
+        // בודק אם השם כבר נמצא ברשימה הראשית
+        const inMain = existingNamesInMain.some(name => 
+            name.trim().toLowerCase() === member.trim().toLowerCase()
+        );
+        
+        // בודק אם השם כבר נמצא ברשימת ממתינים (רק אם addToWaitlist מופעל)
+        const inWaitlist = config.addToWaitlist && existingNamesInWaitlist.some(name => 
+            name.trim().toLowerCase() === member.trim().toLowerCase()
+        );
+        
+        if (inMain) {
+            console.log(`ℹ️ השם "${member}" כבר נמצא ברשימה הראשית, מדלג`);
+            return false;
+        }
+        
+        if (inWaitlist) {
+            console.log(`ℹ️ השם "${member}" כבר נמצא ברשימת ממתינים, מדלג`);
+            return false;
+        }
+        
+        return true;
+    });
+
+    if (membersToAdd.length === 0) {
+        console.log('✅ כל השחקנים כבר נמצאים ברשימה (ראשית או ממתינים)');
+        return null;
+    }
+
+    console.log(`📝 שמות להוספה: ${membersToAdd.join(', ')}`);
+
+    let addedCount = 0;
+    let addedToMain = 0;
+    let addedToWaitlist = 0;
+
+    for (let i = 0; i < allSlots.length && i < membersToAdd.length; i++) {
+        const slot = allSlots[i];
+        const name = membersToAdd[i];
+        lines[slot.lineIndex] = `${slot.number}. ${name}`;
+        addedCount++;
+
+        if (slot.type === 'main') {
+            addedToMain++;
+        } else {
+            addedToWaitlist++;
+        }
+    }
+
+    if (addedCount > 0) {
+        console.log(`✅ נוספו ${addedToMain} שמות לרשימה הראשית`);
+        if (addedToWaitlist > 0) {
+            console.log(`✅ נוספו ${addedToWaitlist} שמות לרשימת ממתינים`);
+        }
+        return { updatedText: lines.join('\n'), addedToMain, addedToWaitlist };
+    }
+
+    return null;
+}
+
+/**
+ * שולח תגובה עם הרשימה המעודכנת
+ */
+async function sendResponse(chat, message, result) {
+    try {
+        console.log(`⏱️ ממתין ${config.delayMs}ms לפני שליחה...`);
+        await new Promise(resolve => setTimeout(resolve, config.delayMs));
+
+        console.log(`📤 מנסה לשלוח הודעה... (replyMode: ${config.replyMode})`);
+        
+        if (config.replyMode) {
+            await message.reply(result.updatedText);
+            console.log('✅ נשלחה תגובה עם הרשימה המעודכנת');
+        } else {
+            await chat.sendMessage(result.updatedText);
+            console.log('✅ נשלחה רשימה מעודכנת לקבוצה');
+        }
+
+        io.emit('message-sent', {
+            group: chat.name,
+            success: true,
+            addedToMain: result.addedToMain,
+            addedToWaitlist: result.addedToWaitlist
+        });
+
+        return true;
+    } catch (error) {
+        console.error('❌ שגיאה בשליחת תגובה:', error);
+        console.error('❌ פרטי השגיאה:', error.stack);
+        io.emit('error', { message: 'שגיאה בשליחת תגובה: ' + error.message });
+        return false;
+    }
+}
+
+/**
+ * טעינת קבוצות (עם מטמון)
+ */
+async function loadGroups(forceRefresh = false) {
+    if (groupsCache && !forceRefresh) {
+        console.log('📦 מחזיר קבוצות מהמטמון');
+        return groupsCache;
+    }
+
+    if (isLoadingGroups) {
+        console.log('⏳ טעינת קבוצות כבר בתהליך...');
+        return null;
+    }
+
+    try {
+        isLoadingGroups = true;
+        console.log('🔄 טוען קבוצות מ-WhatsApp...');
+        const chats = await client.getChats();
+        const groups = chats.filter(chat => chat.isGroup).map(group => ({
+            id: group.id._serialized,
+            name: group.name,
+            isSelected: config.selectedGroups.includes(group.id._serialized)
+        }));
+
+        groupsCache = groups;
+        console.log(`✅ נטענו ${groups.length} קבוצות והוכנסו למטמון`);
+        return groups;
+    } catch (error) {
+        console.error('❌ שגיאה בטעינת קבוצות:', error);
+        return null;
+    } finally {
+        isLoadingGroups = false;
+    }
+}
+
+// ============ REST API Endpoints ============
+
+// סטטוס הבוט
+app.get('/api/status', (req, res) => {
+    res.json(botStatus);
+});
+
+// קבלת כל הקבוצות
+app.get('/api/groups', async (req, res) => {
+    try {
+        if (!botStatus.isReady) {
+            return res.status(503).json({ error: 'הבוט עדיין לא מוכן' });
+        }
+
+        const groups = await loadGroups();
+        if (!groups) {
+            return res.status(500).json({ error: 'שגיאה בטעינת קבוצות' });
+        }
+
+        res.json(groups);
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/groups:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// עדכון קבוצות נבחרות
+app.post('/api/groups/selected', (req, res) => {
+    try {
+        const { selectedGroups } = req.body;
+
+        if (!Array.isArray(selectedGroups)) {
+            return res.status(400).json({ error: 'selectedGroups חייב להיות מערך' });
+        }
+
+        config.selectedGroups = selectedGroups;
+        saveConfig(config);
+
+        // עדכון המטמון
+        if (groupsCache) {
+            groupsCache = groupsCache.map(group => ({
+                ...group,
+                isSelected: selectedGroups.includes(group.id)
+            }));
+        }
+
+        io.emit('config-updated', config);
+        res.json({ success: true, selectedGroups });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/groups/selected:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// קבלת הגדרות
+app.get('/api/config', (req, res) => {
+    res.json(config);
+});
+
+// עדכון הגדרות
+app.post('/api/config', (req, res) => {
+    try {
+        const newConfig = req.body;
+
+        // ולידציה בסיסית
+        if (newConfig.membersToAdd && !Array.isArray(newConfig.membersToAdd)) {
+            return res.status(400).json({ error: 'membersToAdd חייב להיות מערך' });
+        }
+
+        config = { ...config, ...newConfig };
+        saveConfig(config);
+
+        io.emit('config-updated', config);
+        res.json({ success: true, config });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/config:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// קבלת רשימת חברים
+app.get('/api/members', (req, res) => {
+    res.json({ members: config.membersToAdd });
+});
+
+// עדכון רשימת חברים
+app.post('/api/members', (req, res) => {
+    try {
+        const { members } = req.body;
+
+        if (!Array.isArray(members)) {
+            return res.status(400).json({ error: 'members חייב להיות מערך' });
+        }
+
+        config.membersToAdd = members;
+        saveConfig(config);
+
+        io.emit('members-updated', { members });
+        res.json({ success: true, members });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/members:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// רענון קבוצות (מאלץ טעינה מחדש)
+app.post('/api/groups/refresh', async (req, res) => {
+    try {
+        if (!botStatus.isReady) {
+            return res.status(503).json({ error: 'הבוט עדיין לא מוכן' });
+        }
+
+        const groups = await loadGroups(true);
+        res.json({ success: true, groups });
+    } catch (error) {
+        console.error('❌ שגיאה ב-/api/groups/refresh:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// אישור/דחייה של הוספת שמות
+app.post('/api/confirm/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { approved } = req.body;
+
+        console.log(`📥 התקבלה בקשה לאישור: ID=${id}, approved=${approved}`);
+
+        const confirmation = pendingConfirmations.get(id);
+        if (!confirmation) {
+            console.error(`❌ בקשה לא נמצאה: ID=${id}`);
+            return res.status(404).json({ error: 'בקשת אישור לא נמצאה' });
+        }
+
+        if (approved) {
+            console.log(`✅ מאשר שליחה לקבוצה: ${confirmation.groupName}`);
+            const result = {
+                updatedText: confirmation.message,
+                addedToMain: confirmation.addedToMain,
+                addedToWaitlist: confirmation.addedToWaitlist
+            };
+
+            const sent = await sendResponse(confirmation.chat, confirmation.originalMessage, result);
+            if (sent) {
+                console.log(`✅ בקשה אושרה ונשלחה בהצלחה לקבוצה: ${confirmation.groupName}`);
+            } else {
+                console.error(`❌ בקשה אושרה אבל השליחה נכשלה לקבוצה: ${confirmation.groupName}`);
+            }
+        } else {
+            console.log(`❌ בקשה נדחתה עבור קבוצה: ${confirmation.groupName}`);
+            io.emit('confirmation-rejected', { groupName: confirmation.groupName });
+        }
+
+        pendingConfirmations.delete(id);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('❌ שגיאה באישור:', error);
+        console.error('❌ פרטי השגיאה:', error.stack);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// קבלת רשימת בקשות אישור ממתינות
+app.get('/api/confirmations', (req, res) => {
+    const confirmations = Array.from(pendingConfirmations.values()).map(c => ({
+        id: c.id,
+        groupName: c.groupName,
+        addedToMain: c.addedToMain,
+        addedToWaitlist: c.addedToWaitlist,
+        previewText: c.message.substring(0, 200) + '...'
+    }));
+    res.json(confirmations);
+});
+
+// ============ WebSocket ============
+io.on('connection', (socket) => {
+    console.log('🔌 לקוח התחבר לדשבורד');
+    botStatus.connectedClients++;
+
+    // שלח סטטוס נוכחי ללקוח חדש
+    socket.emit('status-update', botStatus);
+    socket.emit('config-updated', config);
+
+    socket.on('disconnect', () => {
+        console.log('🔌 לקוח התנתק מהדשבורד');
+        botStatus.connectedClients--;
+    });
+});
+
+// ============ אירועים של WhatsApp ============
+
+client.on('qr', (qr) => {
+    console.log('📱 QR code נוצר');
+    qrcode.generate(qr, { small: true });
+
+    botStatus.qrCode = qr;
+    io.emit('qr-code', qr);
+});
+
+client.on('ready', async () => {
+    console.log('✅ הבוט מוכן לפעולה!');
+    botStatus.isReady = true;
+    botStatus.qrCode = null;
+    io.emit('status-update', botStatus);
+
+    console.log('📋 טוען קבוצות למטמון...');
+    await loadGroups(true);
+    console.log('✅ קבוצות נטענו בהצלחה!');
+});
+
+client.on('message', async (message) => {
+    try {
+        // לוג ראשוני לכל הודעה שנכנסת
+        console.log('\n📨 === הודעה חדשה נכנסה ===');
+        console.log(`📄 תוכן: ${message.body.substring(0, 50)}...`);
+
+        const chat = await message.getChat();
+        console.log(`💬 צ'אט: ${chat.name} | isGroup: ${chat.isGroup}`);
+
+        if (!chat.isGroup) {
+            console.log('❌ ההודעה אינה מקבוצה, מדלג.');
+            return;
+        }
+
+        const groupId = chat.id._serialized;
+        const groupName = chat.name;
+        const fromName = message._data.notifyName || 'לא ידוע';
+        const author = message.author || message.from; // ב-Group, from זה הקבוצה, author זה השולח
+
+        console.log(`📍 פרטי קבוצה: ${groupName} (ID: ${groupId})`);
+        console.log(`👤 שולח: ${fromName} (ID: ${author})`);
+
+        // שולח את כל ההודעות מהקבוצות הנבחרות לדשבורד (לצפייה)
+        if (config.selectedGroups.includes(groupId)) {
+            io.emit('group-message', {
+                groupId,
+                groupName,
+                from: fromName,
+                message: message.body,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // בודק שזו אחת מהקבוצות שנבחרו
+        const isSelectedGroup = config.selectedGroups.includes(groupId);
+        console.log(`❓ האם הקבוצה ברשימה המותרת? ${isSelectedGroup ? 'כן' : 'לא'}`);
+
+        if (!isSelectedGroup) {
+            console.log('❌ הקבוצה לא ברשימה, מתעלם.');
+            return;
+        }
+
+        // בודק אם זו הודעה מהמשתמש עצמו (טסט עצמי)
+        const isSelfMessage = message.fromMe;
+        console.log(`❓ האם הודעה עצמית? ${isSelfMessage ? 'כן' : 'לא'} | מצב טסט עצמי: ${config.selfTestMode}`);
+
+        if (isSelfMessage && !config.selfTestMode) {
+            console.log('❌ הודעה עצמית וטסט עצמי כבוי, מתעלם.');
+            return;
+        }
+
+        const isFootball = isFootballList(message.body);
+        console.log(`❓ האם זוהתה רשימת כדורגל? ${isFootball ? 'כן' : 'לא'}`);
+
+        if (!isFootball) {
+            console.log('❌ לא זוהתה רשימת כדורגל (מילות מפתח חסרות).');
+            return;
+        }
+
+        console.log(`✅ הודעה תקינה! מתחיל עיבוד...`);
+        console.log(`\n📨 התקבלה הודעה בקבוצה: ${groupName}`);
+        console.log(`👤 מאת: ${fromName}${isSelfMessage ? ' (אתה - טסט עצמי)' : ''}`);
+
+        io.emit('message-received', {
+            groupId,
+            group: groupName,
+            from: fromName,
+            message: message.body.substring(0, 100) + '...',
+            fullMessage: message.body
+        });
+
+        const result = fillEmptySlots(message.body);
+        console.log(`📊 תוצאת עיבוד רשימה: ${result ? 'נמצאו מקומות ומולאו' : 'לא בוצע שינוי (אולי מלא או אין שמות להוספה)'}`);
+
+        if (result) {
+            // אם דורש אישור, שולח בקשה לדשבורד
+            if (config.requireConfirmation) {
+                console.log('⏳ ממתין לאישור מהדשבורד...');
+                console.log(`📋 מצב אישור: requireConfirmation=${config.requireConfirmation}`);
+
+                // שומר את הפרטים להמתנה
+                const confirmationData = {
+                    id: Date.now().toString(),
+                    groupId,
+                    groupName,
+                    message: result.updatedText,
+                    addedToMain: result.addedToMain,
+                    addedToWaitlist: result.addedToWaitlist,
+                    originalMessage: message,
+                    chat
+                };
+
+                // מאחסן בזיכרון ושולח לדשבורד
+                pendingConfirmations.set(confirmationData.id, confirmationData);
+                console.log(`💾 נשמרה בקשה לאישור עם ID: ${confirmationData.id}`);
+
+                io.emit('confirmation-required', {
+                    id: confirmationData.id,
+                    groupName,
+                    addedToMain: result.addedToMain,
+                    addedToWaitlist: result.addedToWaitlist,
+                    previewText: result.updatedText
+                });
+                console.log(`📤 נשלחה בקשה לאישור לדשבורד`);
+            } else {
+                // שולח ישירות ללא אישור
+                console.log('🚀 שולח תגובה אוטומטית...');
+                console.log(`📋 מצב אישור: requireConfirmation=${config.requireConfirmation}`);
+                const sent = await sendResponse(chat, message, result);
+                if (sent) {
+                    console.log('✅ ההודעה נשלחה בהצלחה!');
+                } else {
+                    console.error('❌ ההודעה לא נשלחה - יש שגיאה');
+                }
+            }
+        } else {
+            console.log('ℹ️ אין מה לשלוח - לא נמצאו שמות להוספה או אין מקומות פנויים');
+        }
+
+    } catch (error) {
+        console.error('❌ שגיאה בעיבוד הודעה:', error);
+        io.emit('error', { message: error.message });
+    }
+});
+
+client.on('authenticated', () => {
+    console.log('🔐 אימות הצליח!');
+    botStatus.isAuthenticated = true;
+    io.emit('status-update', botStatus);
+});
+
+client.on('auth_failure', () => {
+    console.error('❌ אימות נכשל!');
+    botStatus.isAuthenticated = false;
+    io.emit('status-update', botStatus);
+});
+
+client.on('disconnected', (reason) => {
+    console.log('⚠️ התנתק:', reason);
+    botStatus.isReady = false;
+    botStatus.isAuthenticated = false;
+    groupsCache = null;
+    io.emit('status-update', botStatus);
+});
+
+// ============ הפעלת השרתים ============
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+    console.log('╔════════════════════════════════════════╗');
+    console.log('║   🎯 WhatsApp Football Bot Dashboard   ║');
+    console.log('╚════════════════════════════════════════╝');
+    console.log('');
+    console.log(`📊 דשבורד: http://localhost:${PORT}`);
+    console.log('🤖 הבוט מתחיל...\n');
+});
+
+client.initialize();

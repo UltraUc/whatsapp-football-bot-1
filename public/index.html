@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 WhatsApp Football Bot - Dashboard</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">⚽</div>
+                <h1>Football Bot</h1>
+            </div>
+
+            <nav class="nav">
+                <button class="nav-item active" data-page="status">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">סטטוס</span>
+                </button>
+                <button class="nav-item" data-page="messages">
+                    <span class="nav-icon">💬</span>
+                    <span class="nav-text">הודעות</span>
+                </button>
+                <button class="nav-item" data-page="groups">
+                    <span class="nav-icon">👥</span>
+                    <span class="nav-text">קבוצות</span>
+                </button>
+                <button class="nav-item" data-page="members">
+                    <span class="nav-icon">🏃</span>
+                    <span class="nav-text">שחקנים</span>
+                </button>
+                <button class="nav-item" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">הגדרות</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <div class="status-dot" id="connectionStatus"></div>
+                    <span id="connectionText">מתחבר...</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Status Page -->
+            <div class="page active" id="statusPage">
+                <div class="page-header">
+                    <h2>📊 סטטוס הבוט</h2>
+                    <p class="subtitle">מעקב בזמן אמת אחר פעילות הבוט</p>
+                </div>
+
+                <div class="cards-grid">
+                    <!-- Bot Status Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>🤖 מצב הבוט</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="status-item">
+                                <span class="status-label">סטטוס חיבור:</span>
+                                <span class="status-value" id="botReady">לא מחובר</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">אימות:</span>
+                                <span class="status-value" id="botAuth">לא מאומת</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">לקוחות מחוברים:</span>
+                                <span class="status-value" id="connectedClients">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- QR Code Card -->
+                    <div class="card" id="qrCard" style="display: none;">
+                        <div class="card-header">
+                            <h3>📱 סרוק להתחברות</h3>
+                        </div>
+                        <div class="card-body center">
+                            <div id="qrcode"></div>
+                            <p class="qr-instructions">פתח את WhatsApp במכשיר שלך וסרוק את ה-QR Code</p>
+                        </div>
+                    </div>
+
+                    <!-- Activity Log -->
+                    <div class="card full-width">
+                        <div class="card-header">
+                            <h3>📝 לוג פעילות</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="activity-log" id="activityLog">
+                                <div class="log-item">
+                                    <span class="log-time">${new Date().toLocaleTimeString('he-IL')}</span>
+                                    <span class="log-message">הדשבורד נטען בהצלחה</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Groups Page -->
+            <div class="page" id="groupsPage">
+                <div class="page-header">
+                    <h2>👥 ניהול קבוצות</h2>
+                    <p class="subtitle">בחר את הקבוצות שבהן הבוט יפעל</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>קבוצות WhatsApp</h3>
+                        <button class="btn btn-secondary" id="refreshGroupsBtn">
+                            <span>🔄</span> רענן
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="groupsLoading" class="loading">
+                            <div class="spinner"></div>
+                            <p>טוען קבוצות...</p>
+                        </div>
+                        <div id="groupsList" class="groups-list" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Members Page -->
+            <div class="page" id="membersPage">
+                <div class="page-header">
+                    <h2>🏃 ניהול שחקנים</h2>
+                    <p class="subtitle">נהל את רשימת השחקנים שיתווספו אוטומטית</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>רשימת שחקנים</h3>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-primary" id="saveMembersBtn">
+                                <span>💾</span> שמור
+                            </button>
+                            <button class="btn btn-secondary" id="addMemberBtn">
+                                <span>➕</span> הוסף שחקן
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="members-info">
+                            <p>💡 השחקנים יתווספו לרשימה לפי הסדר, כאשר יש מקומות פנויים.</p>
+                        </div>
+                        <div id="membersList" class="members-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="settingsPage">
+                <div class="page-header">
+                    <h2>⚙️ הגדרות</h2>
+                    <p class="subtitle">התאם אישית את פעולת הבוט</p>
+                </div>
+
+                <div class="cards-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>מילות מפתח</h3>
+                        </div>
+                        <div class="card-body">
+                            <label class="form-label">מילות מפתח לזיהוי רשימות כדורגל</label>
+                            <div id="keywordsList" class="keywords-list"></div>
+                            <div class="input-group">
+                                <input type="text" id="newKeyword" class="form-input" placeholder="הוסף מילת מפתח...">
+                                <button class="btn btn-secondary" id="addKeywordBtn">הוסף</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>התנהגות</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="replyMode">
+                                    <span>השב להודעה המקורית (במקום לשלוח הודעה חדשה)</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="requireConfirmation">
+                                    <span>✋ דרוש אישור לפני הוספת שחקנים</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="addToWaitlist">
+                                    <span>📋 הוסף לרשימת ממתינים אם אין מקום ברשימה הראשית</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="selfTestMode">
+                                    <span>🧪 טסט עצמי - טפל גם בהודעות שאני שולח</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    השהייה לפני תגובה (מילישניות)
+                                </label>
+                                <input type="number" id="delayMs" class="form-input" min="0" max="10000" step="100">
+                                <small class="form-hint">השהייה כדי שהתגובה תיראה טבעית יותר</small>
+                            </div>
+                            <button class="btn btn-primary" id="saveSettingsBtn">שמור הגדרות</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="/js/dashboard.js"></script>
+</body>
+
+</html>

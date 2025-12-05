@@ -1,0 +1,30 @@
+# WhatsApp Football Bot - Docker Compose
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-football-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # שמירת האימות בין הפעלות
+      - ./wwebjs_auth:/app/.wwebjs_auth
+      # שמירת הקונפיג
+      - ./config.json:/app/config.json
+    environment:
+      - NODE_ENV=production
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    # הגדרות אבטחה
+    security_opt:
+      - no-new-privileges:true
+    # הגבלת משאבים (מתאים ל-Oracle Free Tier)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
