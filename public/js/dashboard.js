@@ -499,24 +499,24 @@ function updateConnectionStatus(isConnected) {
 }
 
 function updateBotStatus(status) {
-    // Ready status
+    // Ready status - בפורמט קצר ל-Quick Stats
     const readyEl = document.getElementById('botReady');
     if (status.isReady) {
-        readyEl.textContent = '✅ מחובר ופעיל';
-        readyEl.style.color = 'var(--success)';
+        readyEl.textContent = '✅';
+        readyEl.style.color = '#22c55e';
     } else {
-        readyEl.textContent = '⏳ לא מחובר';
-        readyEl.style.color = 'var(--warning)';
+        readyEl.textContent = '⏳';
+        readyEl.style.color = '#f59e0b';
     }
 
-    // Auth status
+    // Auth status - בפורמט קצר
     const authEl = document.getElementById('botAuth');
     if (status.isAuthenticated) {
-        authEl.textContent = '✅ מאומת';
-        authEl.style.color = 'var(--success)';
+        authEl.textContent = '✅';
+        authEl.style.color = '#22c55e';
     } else {
-        authEl.textContent = '❌ לא מאומת';
-        authEl.style.color = 'var(--danger)';
+        authEl.textContent = '❌';
+        authEl.style.color = '#ef4444';
     }
 
     // Connected clients
@@ -525,11 +525,6 @@ function updateBotStatus(status) {
     // Hide QR code if ready
     if (status.isReady || status.isAuthenticated) {
         document.getElementById('qrCard').style.display = 'none';
-    }
-    const logItem = document.createElement('div');
-    logItem.className = 'log-item';
-    if (type === 'error') {
-        logItem.style.borderRightColor = 'var(--danger)';
     }
 }
 

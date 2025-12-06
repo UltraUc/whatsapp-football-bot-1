@@ -88,23 +88,27 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
             '--disable-gpu',
             '--disable-extensions',
             '--disable-software-rasterizer',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding'
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--memory-pressure-off',
+            '--max-old-space-size=512'
         ],
-        timeout: 60000
+        timeout: 30000  // timeout מהיר יותר
     },
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
     },
-    // הגדרות נוספות לשמירת חיבור יציב
-    takeoverOnConflict: false,  // לא להדיח מכשירים אחרים
-    restartOnAuthFail: true      // נסה שוב אם האימות נכשל
+    // הגדרות נוספות לחיבור מהיר ויציב
+    takeoverOnConflict: false,
+    restartOnAuthFail: true,
+    qrMaxRetries: 3  // מאמצים ליצור QR
 });
 
 // ============ פונקציות עזר ============
@@ -321,56 +325,95 @@ async function sendResponse(chat, message, result) {
 }
 
 /**
- * טעינת קבוצות (עם מטמון)
- * מגביל ל-50 קבוצות אחרונות, אבל שומר את הקבוצות הנבחרות
+ * טעינת קבוצות (עם מטמון ואופטימיזציה)
+ * מגביל ל-30 קבוצות אחרונות + כל הנבחרות
+ * משתמש ב-timeout למניעת תקיעה
  */
+let lastGroupsLoad = 0;
+const GROUPS_CACHE_TTL = 60000; // 1 דקה cache
+
 async function loadGroups(forceRefresh = false) {
-    if (groupsCache && !forceRefresh) {
-        console.log('📦 מחזיר קבוצות מהמטמון');
+    const now = Date.now();
+
+    // החזר cache אם עדיין בתוקף ולא מאולץ
+    if (groupsCache && !forceRefresh && (now - lastGroupsLoad) < GROUPS_CACHE_TTL) {
+        console.log('📦 מחזיר קבוצות מהמטמון (cache בתוקף)');
         return groupsCache;
     }
 
     if (isLoadingGroups) {
-        console.log('⏳ טעינת קבוצות כבר בתהליך...');
-        return null;
+        console.log('⏳ טעינת קבוצות כבר בתהליך, ממתין...');
+        // המתן לטעינה הנוכחית במקום להחזיר null
+        return new Promise((resolve) => {
+            const checkCache = setInterval(() => {
+                if (!isLoadingGroups && groupsCache) {
+                    clearInterval(checkCache);
+                    resolve(groupsCache);
+                }
+            }, 100);
+            // timeout של 10 שניות
+            setTimeout(() => {
+                clearInterval(checkCache);
+                resolve(groupsCache || []);
+            }, 10000);
+        });
     }
 
     try {
         isLoadingGroups = true;
+        const startTime = Date.now();
         console.log('🔄 טוען קבוצות מ-WhatsApp...');
-        const chats = await client.getChats();
 
-        // סנן רק קבוצות פעילות (לא ארכיון)
-        let allGroups = chats
-            .filter(chat => chat.isGroup && !chat.archived)
-            .map(group => ({
-                id: group.id._serialized,
-                name: group.name,
-                timestamp: group.timestamp || 0,
-                isSelected: config.selectedGroups.includes(group.id._serialized)
-            }));
+        // timeout של 15 שניות לטעינת צ'אטים
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), 15000)
+        );
 
-        console.log(`📊 נמצאו ${allGroups.length} קבוצות פעילות`);
+        const chatsPromise = client.getChats();
+        const chats = await Promise.race([chatsPromise, timeoutPromise]);
+
+        // סינון מהיר - רק קבוצות
+        const groups = [];
+        for (const chat of chats) {
+            if (chat.isGroup && !chat.archived) {
+                groups.push({
+                    id: chat.id._serialized,
+                    name: chat.name,
+                    timestamp: chat.timestamp || 0,
+                    isSelected: config.selectedGroups.includes(chat.id._serialized)
+                });
+            }
+        }
+
+        console.log(`📊 נמצאו ${groups.length} קבוצות ב-${Date.now() - startTime}ms`);
 
         // הפרד לנבחרות ולא נבחרות
-        const selectedGroups = allGroups.filter(g => g.isSelected);
-        const unselectedGroups = allGroups.filter(g => !g.isSelected);
+        const selected = [];
+        const unselected = [];
+        for (const g of groups) {
+            if (g.isSelected) selected.push(g);
+            else unselected.push(g);
+        }
 
-        // מיין את הלא נבחרות לפי זמן (האחרונות קודם)
-        unselectedGroups.sort((a, b) => b.timestamp - a.timestamp);
+        // מיין ובחר 30 לא-נבחרות אחרונות (במקום 50)
+        unselected.sort((a, b) => b.timestamp - a.timestamp);
+        const maxUnselected = Math.max(0, 30 - selected.length);
+        const limited = unselected.slice(0, maxUnselected);
 
-        // קח עד 50 קבוצות: כל הנבחרות + הלא נבחרות האחרונות
-        const maxUnselected = Math.max(0, 50 - selectedGroups.length);
-        const limitedUnselected = unselectedGroups.slice(0, maxUnselected);
+        // שלב - נבחרות קודם
+        groupsCache = [...selected, ...limited];
+        lastGroupsLoad = now;
 
-        // שלב את שתי הרשימות
-        groupsCache = [...selectedGroups, ...limitedUnselected];
-
-        console.log(`✅ טעינה הושלמה: ${selectedGroups.length} נבחרות + ${limitedUnselected.length} אחרות = ${groupsCache.length} סה"כ`);
+        console.log(`✅ טעינה הושלמה ב-${Date.now() - startTime}ms: ${selected.length} נבחרות + ${limited.length} אחרות`);
         return groupsCache;
     } catch (error) {
-        console.error('❌ שגיאה בטעינת קבוצות:', error);
-        return null;
+        console.error('❌ שגיאה בטעינת קבוצות:', error.message);
+        // החזר cache ישן אם יש
+        if (groupsCache) {
+            console.log('📦 משתמש ב-cache ישן בגלל שגיאה');
+            return groupsCache;
+        }
+        return [];
     } finally {
         isLoadingGroups = false;
     }

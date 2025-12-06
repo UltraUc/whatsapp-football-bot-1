@@ -4,13 +4,439 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Football Bot Dashboard</title>
+    <title>⚽ Football Bot Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="css/dashboard.css">
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <style>
+        /* Enhanced Styles - Modern & Beautiful */
+
+        /* Improved Sidebar */
+        .sidebar {
+            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            border-left: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .logo {
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, transparent 100%);
+        }
+
+        .logo-icon {
+            font-size: 4rem;
+            filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.5));
+        }
+
+        .logo h1 {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #f472b6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: none;
+        }
+
+        /* Better Navigation */
+        .nav-item {
+            margin: 0.25rem 0.75rem;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover {
+            background: rgba(99, 102, 241, 0.15);
+            transform: translateX(-3px);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+
+        .nav-icon {
+            font-size: 1.3rem;
+        }
+
+        /* Connection Status */
+        .status-indicator {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        .status-dot.connected {
+            background: #22c55e;
+            box-shadow: 0 0 15px #22c55e;
+        }
+
+        /* Main Content */
+        .main-content {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #1e293b 100%);
+        }
+
+        .page-header h2 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            color: #94a3b8;
+        }
+
+        /* Cards - Glassmorphism */
+        .card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .card-header h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        /* Status Items */
+        .status-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .status-label {
+            font-weight: 500;
+            color: #94a3b8;
+        }
+
+        .status-value {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        /* Buttons */
+        .btn {
+            font-weight: 600;
+            border-radius: 12px;
+            padding: 0.875rem 1.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        }
+
+        /* Groups */
+        .group-item {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+            transition: all 0.2s ease;
+        }
+
+        .group-item:hover {
+            background: rgba(99, 102, 241, 0.1);
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .group-item.selected {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+            border-color: rgba(99, 102, 241, 0.5);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.1);
+        }
+
+        .group-name {
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        /* Members */
+        .member-item {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+        }
+
+        .member-order {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            width: 36px;
+            height: 36px;
+            font-weight: 700;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
+        }
+
+        .member-name {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            font-weight: 500;
+        }
+
+        .member-name:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .members-info {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+        }
+
+        .members-info p {
+            color: #a5b4fc;
+            font-weight: 500;
+        }
+
+        /* Keywords */
+        .keyword-tag {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }
+
+        .keyword-remove {
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .keyword-remove:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Form Inputs */
+        .form-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .form-label {
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Checkboxes */
+        .checkbox-label {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .checkbox-label:hover {
+            background: rgba(99, 102, 241, 0.1);
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 22px;
+            height: 22px;
+            accent-color: #6366f1;
+        }
+
+        /* Activity Log */
+        .activity-log {
+            max-height: 350px;
+            border-radius: 12px;
+            padding: 0.5rem;
+        }
+
+        .log-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 0.875rem 1rem;
+            border-right: 3px solid #6366f1;
+            margin-bottom: 0.5rem;
+        }
+
+        .log-time {
+            font-weight: 600;
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+
+        .log-message {
+            font-weight: 500;
+        }
+
+        /* QR Code */
+        #qrcode {
+            padding: 1.5rem;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
+        }
+
+        .qr-instructions {
+            font-size: 1rem;
+            color: #94a3b8;
+            margin-top: 1.5rem;
+            font-weight: 500;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border-color: rgba(99, 102, 241, 0.2);
+            border-top-color: #6366f1;
+        }
+
+        .loading p {
+            color: #94a3b8;
+            font-weight: 500;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #6366f1 0%, #8b5cf6 100%);
+            border-radius: 10px;
+        }
+
+        /* Modal */
+        .modal-content {
+            background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 24px;
+        }
+
+        .modal-header {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .modal-footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Quick Stats */
+        .quick-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.25rem;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .stat-card:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .stat-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #e2e8f0;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .quick-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 
 <body>
@@ -44,7 +470,7 @@
             <div class="sidebar-footer">
                 <div class="status-indicator">
                     <div class="status-dot" id="connectionStatus"></div>
-                    <span id="connectionText">מחבר...</span>
+                    <span id="connectionText">מתחבר...</span>
                 </div>
             </div>
         </aside>
@@ -54,40 +480,38 @@
             <!-- Dashboard Page -->
             <div id="dashboardPage" class="page active">
                 <div class="page-header">
-                    <h2>דשבורד</h2>
-                    <p class="subtitle">מצב הבוט ופעילות אחרונה</p>
+                    <h2>🎯 דשבורד</h2>
+                    <p class="subtitle">מצב הבוט ופעילות בזמן אמת</p>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="quick-stats">
+                    <div class="stat-card">
+                        <div class="stat-icon">📱</div>
+                        <div class="stat-value" id="botReady">⏳</div>
+                        <div class="stat-label">סטטוס WhatsApp</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔐</div>
+                        <div class="stat-value" id="botAuth">⏳</div>
+                        <div class="stat-label">אימות</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-value" id="connectedClients">0</div>
+                        <div class="stat-label">מחוברים</div>
+                    </div>
                 </div>
 
                 <div class="cards-grid">
-                    <!-- Bot Status -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>🤖 סטטוס הבוט</h3>
-                        </div>
-                        <div class="card-body">
-                            <div class="status-item">
-                                <span class="status-label">WhatsApp:</span>
-                                <span class="status-value" id="botReady">⏳ טוען...</span>
-                            </div>
-                            <div class="status-item">
-                                <span class="status-label">אימות:</span>
-                                <span class="status-value" id="botAuth">⏳ טוען...</span>
-                            </div>
-                            <div class="status-item">
-                                <span class="status-label">לקוחות מחוברים:</span>
-                                <span class="status-value" id="connectedClients">0</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- WhatsApp Controls -->
+                    <!-- Controls -->
                     <div class="card">
                         <div class="card-header">
                             <h3>🔧 ניהול חיבור</h3>
                         </div>
                         <div class="card-body">
                             <button class="btn btn-danger" onclick="logoutWhatsApp()"
-                                style="width: 100%; margin-bottom: 0.5rem;">
+                                style="width: 100%; margin-bottom: 0.75rem;">
                                 🚪 התנתק מ-WhatsApp
                             </button>
                             <button class="btn btn-secondary" onclick="refreshQR()" style="width: 100%;">
@@ -97,14 +521,15 @@
                     </div>
 
                     <!-- QR Code -->
-                    <div class="card full-width" id="qrCard" style="display: none;">
+                    <div class="card" id="qrCard" style="display: none;">
                         <div class="card-header">
                             <h3>📱 QR Code</h3>
                         </div>
                         <div class="card-body center">
                             <div id="qrcode"></div>
-                            <p class="qr-instructions" id="qrInstructions">פתח WhatsApp ← הגדרות ← מכשירים מקושרים ← קשר
-                                מכשיר</p>
+                            <p class="qr-instructions" id="qrInstructions">
+                                פתח WhatsApp ← הגדרות ← מכשירים מקושרים ← קשר מכשיר
+                            </p>
                         </div>
                     </div>
 
@@ -115,7 +540,10 @@
                         </div>
                         <div class="card-body">
                             <div class="activity-log" id="activityLog">
-                                <!-- Log items will be added here -->
+                                <div class="log-item">
+                                    <span class="log-time">עכשיו</span>
+                                    <span class="log-message">✨ הדשבורד נטען</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -125,13 +553,13 @@
             <!-- Groups Page -->
             <div id="groupsPage" class="page">
                 <div class="page-header">
-                    <h2>קבוצות WhatsApp</h2>
+                    <h2>👥 קבוצות</h2>
                     <p class="subtitle">בחר את הקבוצות שהבוט יפעל בהן</p>
                 </div>
 
                 <div class="card">
                     <div class="card-header">
-                        <h3>👥 הקבוצות שלך</h3>
+                        <h3>� הקבוצות שלך</h3>
                         <button id="refreshGroupsBtn" class="btn btn-secondary btn-sm">
                             🔄 רענן
                         </button>
@@ -141,9 +569,7 @@
                             <div class="spinner"></div>
                             <p>טוען קבוצות...</p>
                         </div>
-                        <div id="groupsList" class="groups-list" style="display: none;">
-                            <!-- Groups will be loaded here -->
-                        </div>
+                        <div id="groupsList" class="groups-list" style="display: none;"></div>
                     </div>
                 </div>
             </div>
@@ -151,26 +577,24 @@
             <!-- Members Page -->
             <div id="membersPage" class="page">
                 <div class="page-header">
-                    <h2>רשימת שחקנים</h2>
-                    <p class="subtitle">נהל את רשימת השמות שיתווספו אוטומטית</p>
+                    <h2>🏃 שחקנים</h2>
+                    <p class="subtitle">רשימת השמות שיתווספו אוטומטית</p>
                 </div>
 
                 <div class="card">
                     <div class="card-header">
-                        <h3>🏃 השחקנים</h3>
+                        <h3>⚽ רשימת השחקנים</h3>
                         <button id="addMemberBtn" class="btn btn-primary btn-sm">
                             ➕ הוסף
                         </button>
                     </div>
                     <div class="card-body">
                         <div class="members-info">
-                            <p>💡 סדר השחקנים קובע איזה שמות ימולאו קודם במקומות הפנויים</p>
+                            <p>💡 סדר השחקנים קובע מי ימולא קודם במקומות הפנויים</p>
                         </div>
-                        <div id="membersList" class="members-list">
-                            <!-- Members will be loaded here -->
-                        </div>
-                        <button id="saveMembersBtn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
-                            💾 שמור
+                        <div id="membersList" class="members-list"></div>
+                        <button id="saveMembersBtn" class="btn btn-primary" style="width: 100%; margin-top: 1.5rem;">
+                            <span>💾</span> שמור רשימה
                         </button>
                     </div>
                 </div>
@@ -179,8 +603,8 @@
             <!-- Settings Page -->
             <div id="settingsPage" class="page">
                 <div class="page-header">
-                    <h2>הגדרות</h2>
-                    <p class="subtitle">התאם את התנהגות הבוט לצרכים שלך</p>
+                    <h2>⚙️ הגדרות</h2>
+                    <p class="subtitle">התאם את הבוט לצרכים שלך</p>
                 </div>
 
                 <div class="cards-grid">
@@ -190,46 +614,43 @@
                             <h3>🔍 מילות מפתח</h3>
                         </div>
                         <div class="card-body">
-                            <p class="form-label">מילות המפתח לזיהוי רשימות כדורגל:</p>
-                            <div id="keywordsList" class="keywords-list">
-                                <!-- Keywords will be loaded here -->
-                            </div>
-                            <div class="input-group">
-                                <input type="text" id="newKeyword" class="form-input"
-                                    placeholder="הוסף מילת מפתח חדשה...">
-                                <button id="addKeywordBtn" class="btn btn-primary">➕ הוסף</button>
+                            <label class="form-label">מילות מפתח לזיהוי רשימות כדורגל:</label>
+                            <div id="keywordsList" class="keywords-list"></div>
+                            <div class="input-group" style="margin-top: 1rem;">
+                                <input type="text" id="newKeyword" class="form-input" placeholder="הוסף מילה חדשה...">
+                                <button id="addKeywordBtn" class="btn btn-primary">➕</button>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Bot Behavior -->
+                    <!-- Behavior -->
                     <div class="card">
                         <div class="card-header">
-                            <h3>⚙️ התנהגות בוט</h3>
+                            <h3>🤖 התנהגות</h3>
                         </div>
                         <div class="card-body">
                             <div class="form-group">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="replyMode">
-                                    💬 מצב תגובה (reply)
+                                    💬 מצב Reply
                                 </label>
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="requireConfirmation">
-                                    ✋ דרוש אישור לפני שליחה
+                                    ✋ דרוש אישור
                                 </label>
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="addToWaitlist">
-                                    📋 הוסף לרשימת ממתינים
+                                    📋 רשימת ממתינים
                                 </label>
                             </div>
                             <div class="form-group">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="selfTestMode">
-                                    🧪 מצב טסט עצמי
+                                    🧪 מצב טסט
                                 </label>
                             </div>
                         </div>
@@ -243,13 +664,16 @@
                         <div class="card-body">
                             <div class="form-group">
                                 <label class="form-label">השהייה לפני שליחה (ms):</label>
-                                <input type="number" id="delayMs" class="form-input" min="0" step="100">
-                                <span class="form-hint">זמן המתנה באלפיות השנייה לפני שליחת תגובה</span>
+                                <input type="number" id="delayMs" class="form-input" min="0" step="100" value="2000">
+                                <span class="form-hint"
+                                    style="color: #64748b; font-size: 0.85rem; margin-top: 0.5rem; display: block;">
+                                    מומלץ: 1000-3000ms
+                                </span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Save Settings -->
+                    <!-- Save -->
                     <div class="card full-width">
                         <div class="card-body">
                             <button id="saveSettingsBtn" class="btn btn-primary" style="width: 100%;">
