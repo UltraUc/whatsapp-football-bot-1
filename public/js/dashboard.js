@@ -785,3 +785,34 @@ async function refreshQR() {
     }
 }
 
+// ============ QR Code Display ============
+function displayQRCode(qr) {
+    console.log('📱 Displaying QR code');
+    const qrElement = document.getElementById('qrcode');
+    const qrCard = document.getElementById('qrCard');
+
+    // Show QR card
+    qrCard.style.display = 'block';
+
+    // Clear previous QR code
+    qrElement.innerHTML = '';
+
+    // Generate new QR code
+    try {
+        QRCode.toCanvas(qr, { width: 300, margin: 2 }, (error, canvas) => {
+            if (error) {
+                console.error('QR generation error:', error);
+                qrElement.innerHTML = '<p style="color: var(--danger);">שגיאה ביצירת QR code</p>';
+                return;
+            }
+            qrElement.innerHTML = '';
+            qrElement.appendChild(canvas);
+        });
+    } catch (error) {
+        console.error('QR code error:', error);
+        // Fallback: create a simple div with the QR string
+        qrElement.innerHTML = `<div style="padding: 1rem; background: white; color: black; word-break: break-all; font-size: 0.7rem;">${qr}</div>`;
+    }
+}
+
+
