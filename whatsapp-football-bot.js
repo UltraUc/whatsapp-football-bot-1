@@ -195,6 +195,7 @@ function parseList(text) {
     const waitlistSlots = [];
     const existingNamesInMain = []; // שמות שכבר נמצאים ברשימה הראשית
     const existingNamesInWaitlist = []; // שמות שכבר נמצאים ברשימת ממתינים
+    const waitlistEntries = []; // מידע מלא על רשומות בממתינים (כולל lineIndex)
     let inWaitlist = false;
     let waitlistStartIndex = -1;
 
@@ -239,6 +240,12 @@ function parseList(text) {
                     // רשימת ממתינים
                     if (name) {
                         existingNamesInWaitlist.push(name);
+                        // שומר מידע מלא כולל lineIndex לצורך העברה לרשימה הראשית
+                        waitlistEntries.push({
+                            name: name,
+                            number: slotNumber,
+                            lineIndex: i
+                        });
                     }
                 }
             }
@@ -251,7 +258,8 @@ function parseList(text) {
         waitlistSlots,
         waitlistStartIndex,
         existingNamesInMain,
-        existingNamesInWaitlist
+        existingNamesInWaitlist,
+        waitlistEntries
     };
 }
 
@@ -260,29 +268,10 @@ function parseList(text) {
  * תומך בהוספה גם לרשימת ממתינים אם אין מקום ברשימה הראשית
  * בודק גם אם השמות כבר נמצאים ברשימה הראשית או ברשימת ממתינים
  * תומך ברשימות שחקנים ספציפיות לכל קבוצה
+ * מעביר שחקנים מהממתינים לרשימה הראשית אם יש מקום פנוי
  */
 function fillEmptySlots(text, groupId = null) {
-    const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist } = parseList(text);
-
-    const allSlots = [...emptySlots];
-
-    // אם מופעלת אופציית הוספה לממתינים, מוסיף גם את מקומות הממתינים
-    if (config.addToWaitlist && waitlistSlots.length > 0) {
-        allSlots.push(...waitlistSlots);
-    }
-
-    if (allSlots.length === 0) {
-        console.log('❌ אין מקומות פנויים ברשימה');
-        return null;
-    }
-
-    const mainSlotsCount = emptySlots.length;
-    const waitlistSlotsCount = waitlistSlots.length;
-
-    console.log(`✅ נמצאו ${mainSlotsCount} מקומות פנויים ברשימה הראשית`);
-    if (config.addToWaitlist && waitlistSlotsCount > 0) {
-        console.log(`✅ נמצאו ${waitlistSlotsCount} מקומות פנויים ברשימת ממתינים`);
-    }
+    const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist, waitlistEntries } = parseList(text);
 
     // בחירת רשימת השחקנים - ספציפית לקבוצה או גלובלית
     let membersSource = config.membersToAdd;
@@ -292,6 +281,62 @@ function fillEmptySlots(text, groupId = null) {
         membersSource = config.groupMembers[groupId];
     } else {
         console.log(`📋 משתמש ברשימת שחקנים גלובלית`);
+    }
+
+    let movedFromWaitlist = 0;
+    let addedToMain = 0;
+    let addedToWaitlist = 0;
+
+    // === שלב 1: העברת שחקנים שלנו מהממתינים לרשימה הראשית אם יש מקום ===
+    if (emptySlots.length > 0 && waitlistEntries.length > 0) {
+        // מצא את השחקנים שלנו שנמצאים בממתינים
+        const ourMembersInWaitlist = waitlistEntries.filter(entry =>
+            membersSource.some(member =>
+                member.trim().toLowerCase() === entry.name.trim().toLowerCase()
+            )
+        );
+
+        if (ourMembersInWaitlist.length > 0) {
+            console.log(`🔄 נמצאו ${ourMembersInWaitlist.length} שחקנים שלנו בממתינים`);
+
+            // העבר אותם למקומות הפנויים ברשימה הראשית
+            const slotsToFill = Math.min(ourMembersInWaitlist.length, emptySlots.length);
+
+            for (let i = 0; i < slotsToFill; i++) {
+                const member = ourMembersInWaitlist[i];
+                const targetSlot = emptySlots[i];
+
+                // הוסף לרשימה הראשית
+                lines[targetSlot.lineIndex] = `${targetSlot.number}. ${member.name}`;
+
+                // הסר מהממתינים (תשאיר רק מספר)
+                lines[member.lineIndex] = `${member.number}.`;
+
+                console.log(`✅ הועבר "${member.name}" מממתינים (#${member.number}) לרשימה הראשית (#${targetSlot.number})`);
+                movedFromWaitlist++;
+            }
+
+            // הסר את המקומות שכבר מולאו
+            emptySlots.splice(0, slotsToFill);
+        }
+    }
+
+    // === שלב 2: מילוי מקומות פנויים נותרים עם שחקנים חדשים ===
+    const allSlots = [...emptySlots];
+
+    // אם מופעלת אופציית הוספה לממתינים, מוסיף גם את מקומות הממתינים
+    if (config.addToWaitlist && waitlistSlots.length > 0) {
+        allSlots.push(...waitlistSlots);
+    }
+
+    const mainSlotsCount = emptySlots.length;
+    const waitlistSlotsCount = waitlistSlots.length;
+
+    if (mainSlotsCount > 0) {
+        console.log(`✅ נמצאו ${mainSlotsCount} מקומות פנויים ברשימה הראשית`);
+    }
+    if (config.addToWaitlist && waitlistSlotsCount > 0) {
+        console.log(`✅ נמצאו ${waitlistSlotsCount} מקומות פנויים ברשימת ממתינים`);
     }
 
     // סינון שחקנים שכבר נמצאים ברשימה הראשית או ברשימת ממתינים
@@ -319,36 +364,50 @@ function fillEmptySlots(text, groupId = null) {
         return true;
     });
 
-    if (membersToAdd.length === 0) {
-        console.log('✅ כל השחקנים כבר נמצאים ברשימה (ראשית או ממתינים)');
+    // אם אין מקומות פנויים ואין העברות - סיים
+    if (allSlots.length === 0 && movedFromWaitlist === 0) {
+        console.log('❌ אין מקומות פנויים ברשימה');
         return null;
     }
 
-    console.log(`📝 שמות להוספה: ${membersToAdd.join(', ')}`);
+    if (membersToAdd.length > 0 && allSlots.length > 0) {
+        console.log(`📝 שמות להוספה: ${membersToAdd.join(', ')}`);
 
-    let addedCount = 0;
-    let addedToMain = 0;
-    let addedToWaitlist = 0;
+        for (let i = 0; i < allSlots.length && i < membersToAdd.length; i++) {
+            const slot = allSlots[i];
+            const name = membersToAdd[i];
+            lines[slot.lineIndex] = `${slot.number}. ${name}`;
 
-    for (let i = 0; i < allSlots.length && i < membersToAdd.length; i++) {
-        const slot = allSlots[i];
-        const name = membersToAdd[i];
-        lines[slot.lineIndex] = `${slot.number}. ${name}`;
-        addedCount++;
-
-        if (slot.type === 'main') {
-            addedToMain++;
-        } else {
-            addedToWaitlist++;
+            if (slot.type === 'main') {
+                addedToMain++;
+            } else {
+                addedToWaitlist++;
+            }
         }
     }
 
-    if (addedCount > 0) {
-        console.log(`✅ נוספו ${addedToMain} שמות לרשימה הראשית`);
+    const totalChanges = movedFromWaitlist + addedToMain + addedToWaitlist;
+
+    if (totalChanges > 0) {
+        if (movedFromWaitlist > 0) {
+            console.log(`🔄 הועברו ${movedFromWaitlist} שחקנים מהממתינים לרשימה הראשית`);
+        }
+        if (addedToMain > 0) {
+            console.log(`✅ נוספו ${addedToMain} שמות לרשימה הראשית`);
+        }
         if (addedToWaitlist > 0) {
             console.log(`✅ נוספו ${addedToWaitlist} שמות לרשימת ממתינים`);
         }
-        return { updatedText: lines.join('\n'), addedToMain, addedToWaitlist };
+        return {
+            updatedText: lines.join('\n'),
+            addedToMain,
+            addedToWaitlist,
+            movedFromWaitlist
+        };
+    }
+
+    if (membersToAdd.length === 0 && movedFromWaitlist === 0) {
+        console.log('✅ כל השחקנים כבר נמצאים ברשימה (ראשית או ממתינים)');
     }
 
     return null;

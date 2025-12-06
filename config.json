@@ -1,7 +1,6 @@
 {
   "selectedGroups": [
-    "120363406369860586@g.us",
-    "120363405802773641@g.us"
+    "120363406369860586@g.us"
   ],
   "membersToAdd": [
     "עדי שוקרון",
@@ -15,7 +14,7 @@
     "יום"
   ],
   "replyMode": false,
-  "delayMs": 10000,
+  "delayMs": 800,
   "selfTestMode": false,
   "requireConfirmation": false,
   "addToWaitlist": true
