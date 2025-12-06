@@ -827,6 +827,19 @@ client.on('disconnected', (reason) => {
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0'; // Listen on all interfaces
 
+// בדיקה אם הפורט כבר תפוס (ייתכן שיש instance אחר רץ)
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`❌ שגיאה: הפורט ${PORT} כבר תפוס!`);
+        console.error(`💡 ייתכן שיש instance אחר של הבוט רץ.`);
+        console.error(`💡 עצור את ה-instance הקודם או שנה את הפורט ב-PORT environment variable.`);
+        process.exit(1);
+    } else {
+        console.error('❌ שגיאה בהפעלת השרת:', err);
+        process.exit(1);
+    }
+});
+
 server.listen(PORT, HOST, () => {
     console.log('╔════════════════════════════════════════╗');
     console.log('║   🎯 WhatsApp Football Bot Dashboard   ║');
@@ -835,7 +848,53 @@ server.listen(PORT, HOST, () => {
     console.log(`📊 דשבורד מקומי: http://localhost:${PORT}`);
     console.log(`🌐 לגישה חיצונית, השתמש ב-IP החיצוני של השרת על פורט ${PORT}`);
     console.log('🤖 הבוט מתחיל...\n');
+
+    // אתחול הבוט רק אחרי שהשרת עלה בהצלחה
+    initializeClient();
 });
 
-client.initialize();
+// פונקציה לאתחול הלקוח עם טיפול בשגיאות
+async function initializeClient() {
+    try {
+        console.log('🔄 מאתחל את WhatsApp Client...');
+        await client.initialize();
+    } catch (error) {
+        console.error('❌ שגיאה באתחול הלקוח:', error);
+
+        // אם השגיאה קשורה ל-page binding שכבר קיים, נסה להמשיך
+        if (error.message && error.message.includes('already exists')) {
+            console.log('⚠️ זוהתה בעיית binding קיים - מנסה להמשיך בכל זאת...');
+            console.log('💡 אם הבוט לא עובד כראוי, עצור את כל ה-instances ונסה שוב.');
+        } else {
+            // שגיאה אחרת - צריך לצאת
+            console.error('❌ לא ניתן להמשיך. עוצר את התהליך.');
+            process.exit(1);
+        }
+    }
+}
+
+// טיפול בסגירה נקייה של התהליך
+process.on('SIGINT', async () => {
+    console.log('\n🛑 מקבל signal לסגירה...');
+    try {
+        await client.destroy();
+        console.log('✅ הבוט נסגר בהצלחה');
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ שגיאה בסגירת הבוט:', error);
+        process.exit(1);
+    }
+});
+
+process.on('SIGTERM', async () => {
+    console.log('\n🛑 מקבל signal לסגירה...');
+    try {
+        await client.destroy();
+        console.log('✅ הבוט נסגר בהצלחה');
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ שגיאה בסגירת הבוט:', error);
+        process.exit(1);
+    }
+});
 

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Football Bot - Dashboard</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎯 WhatsApp Football Bot Dashboard</h1>
+            <div class="status-indicator">
+                <span id="connection-status" class="status-badge disconnected">⚠️ לא מחובר</span>
+                <span id="clients-count" class="status-badge">👥 0 מחוברים</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel - Bot Status and Controls -->
+            <div class="left-panel">
+                <!-- Bot Status Card -->
+                <div class="card">
+                    <h2>📊 סטטוס הבוט</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">WhatsApp:</span>
+                            <span id="whatsapp-status" class="value">⏳ טוען...</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">אימות:</span>
+                            <span id="auth-status" class="value">⏳ טוען...</span>
+                        </div>
+                    </div>
+
+                    <!-- QR Code Section -->
+                    <div id="qr-section" class="qr-section hidden">
+                        <h3>📱 סרוק את ה-QR Code כדי להתחבר</h3>
+                        <div id="qr-code" class="qr-code-container"></div>
+                        <p class="qr-instructions">פתח את WhatsApp בטלפון שלך ← הגדרות ← מכשירים מקושרים ← קשר מכשיר</p>
+                    </div>
+
+                    <!-- Control Buttons -->
+                    <div class="control-buttons">
+                        <button id="btn-logout" class="btn btn-danger" disabled>
+                            🚪 התנתק מ-WhatsApp
+                        </button>
+                        <button id="btn-refresh-groups" class="btn btn-primary" disabled>
+                            🔄 רענן קבוצות
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="card">
+                    <h2>📝 לוג פעילות</h2>
+                    <div id="activity-log" class="activity-log">
+                        <div class="log-entry info">
+                            <span class="timestamp">${new Date().toLocaleTimeString('he-IL')}</span>
+                            <span class="message">הדשבורד נטען</span>
+                        </div>
+                    </div>
+                    <button id="btn-clear-log" class="btn btn-secondary">🗑️ נקה לוג</button>
+                </div>
+            </div>
+
+            <!-- Right Panel - Configuration -->
+            <div class="right-panel">
+                <!-- Groups Selection -->
+                <div class="card">
+                    <h2>👥 קבוצות WhatsApp</h2>
+                    <p class="card-description">בחר את הקבוצות שהבוט יפעל בהן</p>
+                    <div id="groups-loading" class="loading">⏳ טוען קבוצות...</div>
+                    <div id="groups-list" class="groups-list hidden"></div>
+                    <button id="btn-save-groups" class="btn btn-success hidden">
+                        💾 שמור קבוצות נבחרות
+                    </button>
+                </div>
+
+                <!-- Members Configuration -->
+                <div class="card">
+                    <h2>⚽ רשימת שחקנים</h2>
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="global">📋 רשימה גלובלית</button>
+                        <button class="tab-btn" data-tab="group-specific">🎯 רשימות לפי קבוצה</button>
+                    </div>
+
+                    <!-- Global Members Tab -->
+                    <div id="tab-global" class="tab-content active">
+                        <p class="card-description">שמות שיתווסף אוטומטית לכל הקבוצות</p>
+                        <div id="members-container" class="members-container">
+                            <!-- Members will be loaded dynamically -->
+                        </div>
+                        <div class="button-group">
+                            <button id="btn-add-member" class="btn btn-secondary">➕ הוסף שם</button>
+                            <button id="btn-save-members" class="btn btn-success">💾 שמור רשימה</button>
+                        </div>
+                    </div>
+
+                    <!-- Group-specific Members Tab -->
+                    <div id="tab-group-specific" class="tab-content">
+                        <p class="card-description">הגדר רשימת שחקנים שונה לכל קבוצה</p>
+                        <div id="group-members-selector" class="form-group">
+                            <label>בחר קבוצה:</label>
+                            <select id="select-group-for-members" class="form-control">
+                                <option value="">-- בחר קבוצה --</option>
+                            </select>
+                        </div>
+                        <div id="group-members-container" class="members-container hidden">
+                            <!-- Group-specific members will be loaded here -->
+                        </div>
+                        <div id="group-members-buttons" class="button-group hidden">
+                            <button id="btn-add-group-member" class="btn btn-secondary">➕ הוסף שם</button>
+                            <button id="btn-save-group-members" class="btn btn-success">💾 שמור רשימה לקבוצה</button>
+                            <button id="btn-reset-group-members" class="btn btn-warning">🔄 חזור לרשימה גלובלית</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings -->
+                <div class="card">
+                    <h2>⚙️ הגדרות</h2>
+                    
+                    <!-- Keywords -->
+                    <div class="form-group">
+                        <label>🔍 מילות מפתח לזיהוי רשימות כדורגל:</label>
+                        <div id="keywords-container" class="keywords-container">
+                            <!-- Keywords will be loaded dynamically -->
+                        </div>
+                        <button id="btn-add-keyword" class="btn btn-secondary">➕ הוסף מילה</button>
+                    </div>
+
+                    <!-- Reply Mode -->
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="setting-reply-mode">
+                            💬 מצב תגובה (reply במקום הודעה חדשה)
+                        </label>
+                    </div>
+
+                    <!-- Confirmation Mode -->
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="setting-require-confirmation">
+                            ✋ דרוש אישור לפני שליחה
+                        </label>
+                    </div>
+
+                    <!-- Add to Waitlist -->
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="setting-add-to-waitlist">
+                            📋 הוסף גם לרשימת ממתינים אם יש מקום
+                        </label>
+                    </div>
+
+                    <!-- Self Test Mode -->
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="setting-self-test-mode">
+                            🧪 מצב טסט עצמי (מגיב גם להודעות שלך)
+                        </label>
+                    </div>
+
+                    <!-- Delay -->
+                    <div class="form-group">
+                        <label>⏱️ השהייה לפני שליחה (אלפיות שנייה):</label>
+                        <input type="number" id="setting-delay" class="form-control" min="0" step="100">
+                    </div>
+
+                    <button id="btn-save-settings" class="btn btn-success">💾 שמור הגדרות</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Confirmation Modal -->
+        <div id="confirmation-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>✋ נדרש אישור לשליחה</h2>
+                <div id="confirmation-details" class="confirmation-details">
+                    <!-- Details will be inserted here -->
+                </div>
+                <div class="modal-buttons">
+                    <button id="btn-approve" class="btn btn-success">✅ אשר ושלח</button>
+                    <button id="btn-reject" class="btn btn-danger">❌ דחה</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Load Dashboard Script -->
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
