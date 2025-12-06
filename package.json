@@ -1,5 +1,5 @@
 {
-  "name": "whatsapp-football-bot",
+  "name": "whatsapp-bot",
   "version": "1.0.0",
   "description": "בוט WhatsApp לניהול רשימות כדורגל",
   "main": "whatsapp-football-bot.js",
