@@ -526,46 +526,6 @@ function updateBotStatus(status) {
     if (status.isReady || status.isAuthenticated) {
         document.getElementById('qrCard').style.display = 'none';
     }
-}
-
-function displayQRCode(qrData) {
-    const qrCard = document.getElementById('qrCard');
-    const qrContainer = document.getElementById('qrcode');
-
-    qrCard.style.display = 'block';
-    qrContainer.innerHTML = '';
-
-    // Create canvas element
-    const canvas = document.createElement('canvas');
-
-    // Use the global QRCode object from the CDN
-    if (window.QRCode) {
-        window.QRCode.toCanvas(canvas, qrData, {
-            width: 256,
-            margin: 2,
-            color: {
-                dark: '#000000',
-                light: '#FFFFFF'
-            }
-        }, (error) => {
-            if (error) {
-                console.error('QR Code generation failed:', error);
-                qrContainer.innerHTML = '<p style="color: var(--danger);">שגיאה ביצירת QR code</p>';
-                return;
-            }
-            qrContainer.appendChild(canvas);
-        });
-    } else {
-        console.error('QRCode library not loaded');
-        qrContainer.innerHTML = '<p style="color: var(--danger);">ספריית QR code לא נטענה</p>';
-    }
-}
-
-// ============ Activity Log ============
-function addLog(message, type = 'info') {
-    const logContainer = document.getElementById('activityLog');
-    const time = new Date().toLocaleTimeString('he-IL');
-
     const logItem = document.createElement('div');
     logItem.className = 'log-item';
     if (type === 'error') {
@@ -778,3 +738,50 @@ window.useGlobalList = useGlobalList;
 window.addGroupMember = addGroupMember;
 window.removeGroupMember = removeGroupMember;
 window.updateGroupMemberName = updateGroupMemberName;
+window.logoutWhatsApp = logoutWhatsApp;
+window.refreshQR = refreshQR;
+
+// ============ WhatsApp Connection Management ============
+async function logoutWhatsApp() {
+    if (!confirm('האם אתה בטוח שברצונך להתנתק? תצטרך לסרוק QR code מחדש.')) {
+        return;
+    }
+
+    try {
+        addLog('🔄 מנתק מ-WhatsApp...');
+        const response = await fetch('/api/logout', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            addLog('✅ התנתקות הצליחה! ממתין ל-QR code חדש...', 'success');
+            document.getElementById('qrCard').style.display = 'block';
+            document.getElementById('qrInstructions').textContent = 'מחכה ל-QR code...';
+        } else {
+            throw new Error(data.error || 'Logout failed');
+        }
+    } catch (error) {
+        console.error('Logout failed:', error);
+        addLog('❌ שגיאה בהתנתקות: ' + error.message, 'error');
+    }
+}
+
+async function refreshQR() {
+    try {
+        addLog('🔄 מבקש QR code חדש...');
+        document.getElementById('qrInstructions').textContent = 'מחכה ל-QR code...';
+        document.getElementById('qrcode').innerHTML = '';
+
+        const response = await fetch('/api/request-qr', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            addLog('✅ בקשה נשלחה. QR code יופיע בקרוב...', 'success');
+        } else {
+            addLog('ℹ️ ' + (data.message || 'כבר מחובר או ממתין'), 'info');
+        }
+    } catch (error) {
+        console.error('QR refresh failed:', error);
+        addLog('❌ שגיאה: ' + error.message, 'error');
+    }
+}
+

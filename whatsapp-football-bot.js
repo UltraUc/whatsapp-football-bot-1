@@ -101,7 +101,10 @@ const client = new Client({
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-    }
+    },
+    // הגדרות נוספות לשמירת חיבור יציב
+    takeoverOnConflict: false,  // לא להדיח מכשירים אחרים
+    restartOnAuthFail: true      // נסה שוב אם האימות נכשל
 });
 
 // ============ פונקציות עזר ============
@@ -528,6 +531,45 @@ app.post('/api/groups/:groupId/members', (req, res) => {
     } catch (error) {
         console.error('❌ שגיאה ב-/api/groups/:groupId/members:', error);
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Logout מ-WhatsApp (מחיקת session)
+app.post('/api/logout', async (req, res) => {
+    try {
+        console.log('🔄 מבצע logout מ-WhatsApp...');
+
+        // נתק את הלקוח
+        await client.logout();
+
+        // עדכן סטטוס
+        botStatus.isReady = false;
+        botStatus.isAuthenticated = false;
+        io.emit('status-update', botStatus);
+
+        console.log('✅ Logout הצליח');
+        res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('❌ שגיאה ב-logout:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// בקשה ל-QR code חדש
+app.post('/api/request-qr', async (req, res) => {
+    try {
+        if (botStatus.isReady || botStatus.isAuthenticated) {
+            return res.json({
+                success: false,
+                message: 'הבוט כבר מחובר. השתמש ב-logout כדי להתחבר מחדש'
+            });
+        }
+
+        console.log('📱 נתבקש QR code חדש');
+        res.json({ success: true, message: 'QR code יופיע בקרוב' });
+    } catch (error) {
+        console.error('❌ שגיאה בבקשת QR:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
