@@ -74,12 +74,14 @@ let isLoadingGroups = false;
 let pendingConfirmations = new Map(); // אחסון בקשות אישור ממתינות
 
 // ============ יצירת הבוט ============
-let client = createClient();
+let client = null;
+let isClientReady = false;
 
 function createClient() {
     return new Client({
         authStrategy: new LocalAuth({
-            dataPath: './.wwebjs_auth'
+            dataPath: './.wwebjs_auth',
+            clientId: 'whatsapp-bot'
         }),
         puppeteer: {
             headless: true,
@@ -92,70 +94,85 @@ function createClient() {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process'
             ],
-            timeout: 120000
-        },
-        webVersionCache: {
-            type: 'none'
-        },
-        takeoverOnConflict: false,
-        restartOnAuthFail: true
+            timeout: 0 // ללא timeout
+        }
+        // ללא webVersionCache - משתמש בברירת מחדל
     });
 }
 
 function setupClientEvents() {
+    // QR Code
     client.on('qr', (qr) => {
-        console.log('📱 QR code נוצר');
+        console.log('📱 QR code נוצר - סרוק עם WhatsApp!');
         qrcode.generate(qr, { small: true });
         botStatus.qrCode = qr;
+        botStatus.isReady = false;
+        botStatus.isAuthenticated = false;
         io.emit('qr-code', qr);
+        io.emit('status-update', botStatus);
     });
 
+    // Loading screen
+    client.on('loading_screen', (percent, message) => {
+        console.log(`⏳ טוען: ${percent}% - ${message}`);
+    });
+
+    // אימות הצליח
+    client.on('authenticated', () => {
+        console.log('🔐 אימות הצליח!');
+        botStatus.isAuthenticated = true;
+        botStatus.qrCode = null;
+        io.emit('status-update', botStatus);
+    });
+
+    // מוכן
     client.on('ready', async () => {
         console.log('✅ הבוט מוכן לפעולה!');
+        isClientReady = true;
         botStatus.isReady = true;
         botStatus.isAuthenticated = true;
         botStatus.qrCode = null;
         io.emit('status-update', botStatus);
 
-        console.log('📋 טוען קבוצות למטמון...');
-        await loadGroups(true);
-        console.log('✅ קבוצות נטענו בהצלחה!');
+        // טען קבוצות ברקע (לא חוסם)
+        loadGroupsBackground();
     });
 
-    client.on('authenticated', () => {
-        console.log('🔐 אימות הצליח!');
-        botStatus.isAuthenticated = true;
-        io.emit('status-update', botStatus);
-    });
-
+    // אימות נכשל
     client.on('auth_failure', (msg) => {
         console.error('❌ אימות נכשל!', msg);
         botStatus.isAuthenticated = false;
         botStatus.isReady = false;
+        isClientReady = false;
         io.emit('status-update', botStatus);
     });
 
-    client.on('disconnected', async (reason) => {
+    // התנתקות
+    client.on('disconnected', (reason) => {
         console.log('⚠️ התנתק:', reason);
         botStatus.isReady = false;
         botStatus.isAuthenticated = false;
-        groupsCache = null;
+        isClientReady = false;
         io.emit('status-update', botStatus);
-
-        // נסה להתחבר מחדש אחרי 5 שניות
-        console.log('🔄 מנסה להתחבר מחדש בעוד 5 שניות...');
-        setTimeout(async () => {
-            try {
-                await client.initialize();
-            } catch (err) {
-                console.error('❌ נכשל להתחבר מחדש:', err.message);
-            }
-        }, 5000);
     });
 
+    // הודעות
     client.on('message', handleMessage);
+}
+
+// טעינת קבוצות ברקע ללא חסימה
+async function loadGroupsBackground() {
+    console.log('📋 מתחיל לטעון קבוצות ברקע...');
+    try {
+        await loadGroups(true);
+        console.log('✅ קבוצות נטענו!');
+    } catch (e) {
+        console.log('⚠️ בעיה בטעינת קבוצות - תתמלא מהודעות:', e.message);
+    }
 }
 
 // ============ פונקציות עזר ============
@@ -980,40 +997,46 @@ server.listen(PORT, HOST, () => {
     console.log(`🌐 לגישה חיצונית, השתמש ב-IP החיצוני של השרת על פורט ${PORT}`);
     console.log('🤖 הבוט מתחיל...\n');
 
-    // הגדר events ואתחל
-    setupClientEvents();
+    // אתחול
     initializeClient();
 });
 
 async function initializeClient() {
     try {
         console.log('🔄 מאתחל את WhatsApp Client...');
+
+        // צור client חדש
+        client = createClient();
+        setupClientEvents();
+
+        // אתחל
         await client.initialize();
+
     } catch (error) {
-        console.error('❌ שגיאה באתחול הלקוח:', error.message);
+        console.error('❌ שגיאה באתחול:', error.message);
 
         if (error.message && error.message.includes('already exists')) {
-            console.log('⚠️ זוהתה בעיית binding קיים.');
-            console.log('💡 מנסה ליצור client חדש...');
+            console.log('⚠️ בעיית binding - מנסה שוב...');
 
-            // נסה ליצור client חדש
+            // נסה להרוס ולאתחל מחדש
             try {
-                await client.destroy();
+                if (client) await client.destroy();
             } catch (e) { }
 
-            client = createClient();
-            setupClientEvents();
-
+            // המתן ונסה שוב
             setTimeout(async () => {
                 try {
+                    client = createClient();
+                    setupClientEvents();
                     await client.initialize();
                 } catch (e) {
-                    console.error('❌ נכשל גם בניסיון השני:', e.message);
+                    console.error('❌ נכשל שוב:', e.message);
                 }
-            }, 3000);
+            }, 5000);
         } else {
-            console.error('❌ לא ניתן להמשיך.');
-            process.exit(1);
+            // שגיאה אחרת - נסה שוב אחרי 10 שניות
+            console.log('🔄 מנסה שוב בעוד 10 שניות...');
+            setTimeout(() => initializeClient(), 10000);
         }
     }
 }
