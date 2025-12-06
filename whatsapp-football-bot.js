@@ -97,9 +97,7 @@ function createClient() {
             timeout: 120000
         },
         webVersionCache: {
-            type: 'local',
-            path: './.wwebjs_cache',
-            strict: false
+            type: 'none'
         },
         takeoverOnConflict: false,
         restartOnAuthFail: true
