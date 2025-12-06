@@ -92,16 +92,11 @@ function createClient() {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-software-rasterizer'
+                '--disable-gpu'
             ],
-            timeout: 60000
+            timeout: 90000
         },
-        webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-        },
+        // ללא webVersionCache - משתמש בגרסה עדכנית אוטומטית
         takeoverOnConflict: false,
         restartOnAuthFail: true
     });
