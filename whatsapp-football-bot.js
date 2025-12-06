@@ -439,7 +439,7 @@ async function loadGroups(forceRefresh = false) {
         // סינון - רק קבוצות
         const groups = [];
         for (const chat of chats) {
-            if (chat.isGroup && !chat.archived) {
+            if (chat.isGroup && !chat.archived && chat.name) {
                 groups.push({
                     id: chat.id._serialized,
                     name: chat.name,
@@ -459,9 +459,9 @@ async function loadGroups(forceRefresh = false) {
             else unselected.push(g);
         }
 
-        // מיין ובחר 30 לא-נבחרות אחרונות
+        // מיין ובחר 10 לא-נבחרות אחרונות
         unselected.sort((a, b) => b.timestamp - a.timestamp);
-        const maxUnselected = Math.max(0, 30 - selected.length);
+        const maxUnselected = Math.max(0, 10 - selected.length);
         const limited = unselected.slice(0, maxUnselected);
 
         // שלב - נבחרות קודם

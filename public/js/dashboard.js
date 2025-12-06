@@ -252,22 +252,25 @@ function loadSettings() {
 function renderGroups() {
     const listEl = document.getElementById('groupsList');
 
-    if (!groups || groups.length === 0) {
+    // הגבלה ל-10 קבוצות
+    const displayGroups = groups ? groups.slice(0, 10) : [];
+
+    if (displayGroups.length === 0) {
         listEl.innerHTML = '<p style="text-align: center; color: var(--text-muted);">לא נמצאו קבוצות</p>';
         return;
     }
 
-    listEl.innerHTML = groups.map(group => `
+    listEl.innerHTML = displayGroups.map(group => `
         <div class="group-item ${group.isSelected ? 'selected' : ''}" data-group-id="${group.id}">
             <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
                 <input type="checkbox" 
                        class="group-checkbox" 
                        ${group.isSelected ? 'checked' : ''} 
                        onchange="toggleGroup('${group.id}')">
-                <span class="group-name">${group.name}</span>
+                <span class="group-name">${group.name || 'קבוצה ללא שם'}</span>
             </div>
             ${group.isSelected ? `
-                <button class="btn btn-secondary btn-sm" onclick="manageGroupMembers('${group.id}', '${group.name.replace(/'/g, "\\'")}')"
+                <button class="btn btn-secondary btn-sm" onclick="manageGroupMembers('${group.id}', '${(group.name || '').replace(/'/g, "\\'")}')"
                         style="padding: 0.25rem 0.5rem; font-size: 0.85rem;">
                     👥 רשימת שחקנים
                 </button>
