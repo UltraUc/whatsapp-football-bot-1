@@ -411,15 +411,15 @@ async function loadGroups(forceRefresh = false) {
         const startTime = Date.now();
         console.log('🔄 טוען קבוצות מ-WhatsApp...');
 
-        // timeout של 60 שניות לטעינת צ'אטים (יותר זמן לחיבורים איטיים)
+        // timeout של 30 שניות
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), 60000)
+            setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), 30000)
         );
 
         const chatsPromise = client.getChats();
         const chats = await Promise.race([chatsPromise, timeoutPromise]);
 
-        // סינון מהיר - רק קבוצות
+        // סינון - רק קבוצות
         const groups = [];
         for (const chat of chats) {
             if (chat.isGroup && !chat.archived) {
@@ -442,7 +442,7 @@ async function loadGroups(forceRefresh = false) {
             else unselected.push(g);
         }
 
-        // מיין ובחר 30 לא-נבחרות אחרונות (במקום 50)
+        // מיין ובחר 30 לא-נבחרות אחרונות
         unselected.sort((a, b) => b.timestamp - a.timestamp);
         const maxUnselected = Math.max(0, 30 - selected.length);
         const limited = unselected.slice(0, maxUnselected);
@@ -451,18 +451,73 @@ async function loadGroups(forceRefresh = false) {
         groupsCache = [...selected, ...limited];
         lastGroupsLoad = now;
 
-        console.log(`✅ טעינה הושלמה ב-${Date.now() - startTime}ms: ${selected.length} נבחרות + ${limited.length} אחרות`);
+        // שמור לקובץ כ-backup
+        saveGroupsToFile(groupsCache);
+
+        console.log(`✅ טעינה הושלמה: ${selected.length} נבחרות + ${limited.length} אחרות`);
         return groupsCache;
     } catch (error) {
         console.error('❌ שגיאה בטעינת קבוצות:', error.message);
-        // החזר cache ישן אם יש
-        if (groupsCache) {
-            console.log('📦 משתמש ב-cache ישן בגלל שגיאה');
+
+        // נסה לטעון מקובץ backup
+        const savedGroups = loadGroupsFromFile();
+        if (savedGroups && savedGroups.length > 0) {
+            console.log('📦 משתמש בקבוצות שמורות מקובץ');
+            groupsCache = savedGroups;
             return groupsCache;
         }
+
+        // החזר cache ישן אם יש
+        if (groupsCache && groupsCache.length > 0) {
+            console.log('📦 משתמש ב-cache ישן');
+            return groupsCache;
+        }
+
         return [];
     } finally {
         isLoadingGroups = false;
+    }
+}
+
+// שמירת קבוצות לקובץ backup
+function saveGroupsToFile(groups) {
+    try {
+        const filePath = path.join(__dirname, '.groups_cache.json');
+        fs.writeFileSync(filePath, JSON.stringify(groups, null, 2));
+    } catch (e) {
+        // שקט - לא קריטי
+    }
+}
+
+// טעינת קבוצות מקובץ backup
+function loadGroupsFromFile() {
+    try {
+        const filePath = path.join(__dirname, '.groups_cache.json');
+        if (fs.existsSync(filePath)) {
+            const data = fs.readFileSync(filePath, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        // שקט
+    }
+    return null;
+}
+
+// הוספת קבוצה מהודעה נכנסת (פתרון עוקף)
+function addGroupFromMessage(groupId, groupName) {
+    if (!groupsCache) groupsCache = [];
+
+    // בדוק אם הקבוצה כבר קיימת
+    const exists = groupsCache.find(g => g.id === groupId);
+    if (!exists) {
+        groupsCache.push({
+            id: groupId,
+            name: groupName,
+            timestamp: Date.now(),
+            isSelected: config.selectedGroups.includes(groupId)
+        });
+        console.log(`➕ נוספה קבוצה חדשה למטמון: ${groupName}`);
+        saveGroupsToFile(groupsCache);
     }
 }
 
@@ -799,6 +854,9 @@ async function handleMessage(message) {
 
         console.log(`📍 פרטי קבוצה: ${groupName} (ID: ${groupId})`);
         console.log(`👤 שולח: ${fromName} (ID: ${author})`);
+
+        // הוסף קבוצה למטמון (פתרון עוקף לבעיית getChats)
+        addGroupFromMessage(groupId, groupName);
 
         // שולח את כל ההודעות מהקבוצות הנבחרות לדשבורד (לצפייה)
         if (config.selectedGroups.includes(groupId)) {
