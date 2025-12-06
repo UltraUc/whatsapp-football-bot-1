@@ -97,8 +97,9 @@ function createClient() {
             timeout: 120000
         },
         webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/AdenChen27/AdenChen27.github.io/refs/heads/main/wa.html'
+            type: 'local',
+            path: './.wwebjs_cache',
+            strict: false
         },
         takeoverOnConflict: false,
         restartOnAuthFail: true
