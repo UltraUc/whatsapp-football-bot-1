@@ -94,9 +94,12 @@ function createClient() {
                 '--single-process',
                 '--disable-gpu'
             ],
-            timeout: 90000
+            timeout: 120000
         },
-        // ללא webVersionCache - משתמש בגרסה עדכנית אוטומטית
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/AdenChen27/AdenChen27.github.io/refs/heads/main/wa.html'
+        },
         takeoverOnConflict: false,
         restartOnAuthFail: true
     });
