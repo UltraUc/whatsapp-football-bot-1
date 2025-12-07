@@ -246,6 +246,12 @@ function loadSettings() {
 
     // Delay
     document.getElementById('delayMs').value = config.delayMs || 2000;
+
+    // Groups Load Timeout
+    const timeoutInput = document.getElementById('groupsLoadTimeout');
+    if (timeoutInput) {
+        timeoutInput.value = config.groupsLoadTimeout || 60;
+    }
 }
 
 // ============ Rendering ============
@@ -446,6 +452,7 @@ function removeKeyword(index) {
 async function saveSettings() {
     const replyMode = document.getElementById('replyMode').checked;
     const delayMs = parseInt(document.getElementById('delayMs').value);
+    const groupsLoadTimeout = parseInt(document.getElementById('groupsLoadTimeout').value);
 
     const confirmCheckbox = document.getElementById('requireConfirmation');
     const waitlistCheckbox = document.getElementById('addToWaitlist');
@@ -455,6 +462,7 @@ async function saveSettings() {
         ...config,
         replyMode,
         delayMs,
+        groupsLoadTimeout,
         selfTestMode: selfTestCheckbox ? selfTestCheckbox.checked : false,
         requireConfirmation: confirmCheckbox ? confirmCheckbox.checked : false,
         addToWaitlist: waitlistCheckbox ? waitlistCheckbox.checked : true
