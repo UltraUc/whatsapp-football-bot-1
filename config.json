@@ -17,5 +17,14 @@
   "delayMs": 800,
   "selfTestMode": false,
   "requireConfirmation": false,
-  "addToWaitlist": true
+  "addToWaitlist": true,
+  "groupsLoadTimeout": 60,
+  "groupMembers": {
+    "120363406369860586@g.us": [
+      "עדי שוקרון",
+      "ליאל כהן",
+      "שובל דיין",
+      "ניב לב"
+    ]
+  }
 }

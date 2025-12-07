@@ -487,9 +487,11 @@ async function loadGroups(forceRefresh = false) {
         const startTime = Date.now();
         console.log('🔄 טוען קבוצות מ-WhatsApp...');
 
-        // timeout של 30 שניות
+        // timeout - נקבע בהגדרות (ברירת מחדל 60 שניות)
+        const timeoutMs = (config.groupsLoadTimeout || 60) * 1000;
+        console.log(`⏱️ Timeout מוגדר ל-${config.groupsLoadTimeout || 60} שניות`);
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), 30000)
+            setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), timeoutMs)
         );
 
         const chatsPromise = client.getChats();
