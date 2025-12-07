@@ -520,7 +520,7 @@ async function loadGroups(forceRefresh = false) {
             else unselected.push(g);
         }
 
-        // מיין ובחר 10 לא-נבחרות אחרונות
+        //  מיין ובחר 10 לא-נבחרות אחרונות
         unselected.sort((a, b) => b.timestamp - a.timestamp);
         const maxUnselected = Math.max(0, 10 - selected.length);
         const limited = unselected.slice(0, maxUnselected);
