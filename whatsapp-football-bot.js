@@ -455,7 +455,11 @@ function fillEmptySlots(text, groupId = null) {
 
     const totalChanges = movedFromWaitlist + addedToMain + addedToWaitlist;
 
-    if (totalChanges > 0) {
+    // אם ביצענו השלמה של רשימה חלקית, או הוספנו שחקנים - החזר תוצאה
+    if (totalChanges > 0 || needsCompletion) {
+        if (needsCompletion && totalChanges === 0) {
+            console.log(`✅ הושלמה רשימה חלקית (נוספו מספרים 5-15 ורשימת ממתינים)`);
+        }
         if (movedFromWaitlist > 0) {
             console.log(`🔄 הועברו ${movedFromWaitlist} שחקנים מהממתינים לרשימה הראשית`);
         }
@@ -473,7 +477,7 @@ function fillEmptySlots(text, groupId = null) {
         };
     }
 
-    if (membersToAdd.length === 0 && movedFromWaitlist === 0) {
+    if (membersToAdd.length === 0 && movedFromWaitlist === 0 && !needsCompletion) {
         console.log('✅ כל השחקנים כבר נמצאים ברשימה (ראשית או ממתינים)');
     }
 
