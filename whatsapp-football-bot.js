@@ -182,12 +182,25 @@ async function loadGroupsBackground() {
  */
 function isFootballList(message) {
     const text = message.toLowerCase();
-    return config.keywords.some(keyword => text.includes(keyword.toLowerCase()));
+    
+    // בדיקה 1: מילות מפתח רגילות
+    const hasKeywords = config.keywords.some(keyword => text.includes(keyword.toLowerCase()));
+    
+    // בדיקה 2: האם יש רשימה ממוספרת (לפחות 2 שורות עם מספרים)
+    const numberedLines = message.split('\n').filter(line => {
+        // מחפש שורות שמתחילות במספר ונקודה (עם או בלי שם)
+        return /^\s*\d+\s*\.\s*/.test(line);
+    });
+    
+    const hasNumberedList = numberedLines.length >= 2;
+    
+    return hasKeywords || hasNumberedList;
 }
 
 /**
  * מנתח את הרשימה ומוצא מקומות פנויים ברשימה הראשית וברשימת ממתינים
  * גם מזהה שמות שכבר נמצאים ברשימה
+ * תומך ברשימות חלקיות - משלים את המספרים החסרים
  */
 function parseList(text) {
     const lines = text.split('\n');
@@ -196,8 +209,10 @@ function parseList(text) {
     const existingNamesInMain = []; // שמות שכבר נמצאים ברשימה הראשית
     const existingNamesInWaitlist = []; // שמות שכבר נמצאים ברשימת ממתינים
     const waitlistEntries = []; // מידע מלא על רשומות בממתינים (כולל lineIndex)
+    const occupiedSlots = new Set(); // מספרים תפוסים ברשימה הראשית
     let inWaitlist = false;
     let waitlistStartIndex = -1;
+    let maxNumberFound = 0; // המספר הגבוה ביותר שנמצא ברשימה
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -218,6 +233,7 @@ function parseList(text) {
             if (!inWaitlist) {
                 // רשימה ראשית (1-15)
                 if (slotNumber >= 1 && slotNumber <= 15) {
+                    maxNumberFound = Math.max(maxNumberFound, slotNumber);
                     emptySlots.push({ number: slotNumber, lineIndex: i, type: 'main' });
                 }
             } else {
@@ -234,6 +250,8 @@ function parseList(text) {
                 if (!inWaitlist) {
                     // רשימה ראשית (1-15)
                     if (slotNumber >= 1 && slotNumber <= 15 && name) {
+                        maxNumberFound = Math.max(maxNumberFound, slotNumber);
+                        occupiedSlots.add(slotNumber);
                         existingNamesInMain.push(name);
                     }
                 } else {
@@ -259,7 +277,9 @@ function parseList(text) {
         waitlistStartIndex,
         existingNamesInMain,
         existingNamesInWaitlist,
-        waitlistEntries
+        waitlistEntries,
+        maxNumberFound,
+        occupiedSlots
     };
 }
 
@@ -269,9 +289,56 @@ function parseList(text) {
  * בודק גם אם השמות כבר נמצאים ברשימה הראשית או ברשימת ממתינים
  * תומך ברשימות שחקנים ספציפיות לכל קבוצה
  * מעביר שחקנים מהממתינים לרשימה הראשית אם יש מקום פנוי
+ * משלים רשימות חלקיות - אם יש רק 1-4 משלים עד 15
  */
 function fillEmptySlots(text, groupId = null) {
-    const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist, waitlistEntries } = parseList(text);
+    const { lines, emptySlots, waitlistSlots, existingNamesInMain, existingNamesInWaitlist, waitlistEntries, maxNumberFound, occupiedSlots } = parseList(text);
+    
+    // אם זו רשימה חלקית (פחות מ-15), השלם את המספרים החסרים
+    let needsCompletion = false;
+    if (maxNumberFound > 0 && maxNumberFound < 15) {
+        console.log(`📋 זוהתה רשימה חלקית (עד מספר ${maxNumberFound}), משלים עד 15...`);
+        needsCompletion = true;
+        
+        // מצא את השורה האחרונה עם מספר ברשימה הראשית
+        let lastLineIndex = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            const match = line.match(/^\s*(\d+)\s*\./);
+            if (match) {
+                const num = parseInt(match[1]);
+                if (num >= 1 && num <= 15) {
+                    lastLineIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        // הוסף את המספרים החסרים
+        for (let num = maxNumberFound + 1; num <= 15; num++) {
+            if (!occupiedSlots.has(num)) {
+                lastLineIndex++;
+                lines.splice(lastLineIndex, 0, `${num}.`);
+                emptySlots.push({ number: num, lineIndex: lastLineIndex, type: 'main' });
+            }
+        }
+        
+        // אם אין רשימת ממתינים, הוסף אחת
+        if (config.addToWaitlist && lines.findIndex(l => l.includes('ממתינים')) === -1) {
+            lastLineIndex++;
+            lines.splice(lastLineIndex, 0, '');
+            lastLineIndex++;
+            lines.splice(lastLineIndex, 0, 'ממתינים:');
+            const waitlistStartIndex = lastLineIndex;
+            
+            // הוסף 5 מקומות ממתינים
+            for (let num = 1; num <= 5; num++) {
+                lastLineIndex++;
+                lines.splice(lastLineIndex, 0, `${num}.`);
+                waitlistSlots.push({ number: num, lineIndex: lastLineIndex, type: 'waitlist' });
+            }
+        }
+    }
 
     // בחירת רשימת השחקנים - ספציפית לקבוצה או גלובלית
     let membersSource = config.membersToAdd;
