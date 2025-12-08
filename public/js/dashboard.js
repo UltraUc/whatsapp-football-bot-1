@@ -244,8 +244,11 @@ function loadSettings() {
         selfTestCheckbox.checked = config.selfTestMode || false;
     }
 
-    // Delay
-    document.getElementById('delayMs').value = config.delayMs || 2000;
+    // Delay - טעינת ערך ה-ms לפני שליחת הודעה
+    const delayInput = document.getElementById('delayMs');
+    if (delayInput) {
+        delayInput.value = config.delayMs || 2000;
+    }
 
     // Groups Load Timeout
     const timeoutInput = document.getElementById('groupsLoadTimeout');
@@ -452,7 +455,10 @@ function removeKeyword(index) {
 async function saveSettings() {
     const replyMode = document.getElementById('replyMode').checked;
     const delayMs = parseInt(document.getElementById('delayMs').value);
-    const groupsLoadTimeout = parseInt(document.getElementById('groupsLoadTimeout').value);
+    
+    // בדיקה אם האלמנט קיים לפני ניסיון לקרוא אותו
+    const groupsLoadTimeoutInput = document.getElementById('groupsLoadTimeout');
+    const groupsLoadTimeout = groupsLoadTimeoutInput ? parseInt(groupsLoadTimeoutInput.value) : (config.groupsLoadTimeout || 60);
 
     const confirmCheckbox = document.getElementById('requireConfirmation');
     const waitlistCheckbox = document.getElementById('addToWaitlist');
