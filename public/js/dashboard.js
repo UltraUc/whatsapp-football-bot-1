@@ -87,6 +87,27 @@ function initializeSocket() {
     socket.on('error', (data) => {
         addLog(`❌ שגיאה: ${data.message}`, 'error');
     });
+
+    // התקדמות טעינה
+    socket.on('loading-progress', (data) => {
+        console.log(`⏳ Loading: ${data.percent}%`);
+        updateLoadingProgress(data.percent, data.message);
+    });
+
+    // לוג מהשרת
+    socket.on('log', (data) => {
+        if (data.message) {
+            addLog(`📡 ${data.message}`);
+        }
+    });
+}
+
+function updateLoadingProgress(percent, message) {
+    const readyEl = document.getElementById('botReady');
+    if (readyEl && percent < 100) {
+        readyEl.textContent = `${percent}%`;
+        readyEl.style.color = '#f59e0b';
+    }
 }
 
 // ============ Navigation ============
