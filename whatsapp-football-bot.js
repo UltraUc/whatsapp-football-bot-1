@@ -88,31 +88,46 @@ function createClient() {
         }),
         puppeteer: {
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
-                '--no-zygote',
                 '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-software-rasterizer',
                 '--disable-extensions',
                 '--disable-background-networking',
                 '--disable-sync',
                 '--disable-translate',
-                '--metrics-recording-only',
+                '--disable-default-apps',
                 '--mute-audio',
                 '--no-default-browser-check',
-                '--safebrowsing-disable-auto-update'
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-client-side-phishing-detection',
+                '--disable-component-update',
+                '--disable-domain-reliability',
+                '--disable-features=AudioServiceOutOfProcess',
+                '--disable-print-preview',
+                '--disable-ipc-flooding-protection',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--force-color-profile=srgb',
+                '--hide-scrollbars',
+                '--metrics-recording-only',
+                '--safebrowsing-disable-auto-update',
+                '--password-store=basic',
+                '--use-mock-keychain',
+                '--export-tagged-pdf',
+                '--window-size=1920,1080'
             ],
-            timeout: 60000 // 60 שניות timeout
+            timeout: 120000, // 2 דקות timeout
+            protocolTimeout: 120000
         },
         webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/AuYuRa/test1/main/AuYuRa.json'
+            type: 'local'
         }
     });
 }
@@ -1352,42 +1367,67 @@ server.listen(PORT, HOST, () => {
     initializeClient();
 });
 
+let initAttempts = 0;
+const MAX_INIT_ATTEMPTS = 3;
+
 async function initializeClient() {
+    initAttempts++;
+    
     try {
-        console.log('🔄 מאתחל את WhatsApp Client...');
+        console.log(`🔄 מאתחל את WhatsApp Client... (ניסיון ${initAttempts}/${MAX_INIT_ATTEMPTS})`);
+        io.emit('log', { message: `מאתחל WhatsApp (ניסיון ${initAttempts})...` });
+
+        // נקה client קודם אם קיים
+        if (client) {
+            try {
+                console.log('🧹 מנקה client קודם...');
+                await client.destroy();
+            } catch (e) {
+                console.log('⚠️ לא הצלחתי לנקות client קודם:', e.message);
+            }
+            client = null;
+        }
+
+        // המתן קצת לפני יצירת client חדש
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // צור client חדש
         client = createClient();
         setupClientEvents();
 
         // אתחל
+        console.log('🚀 מתחיל אתחול...');
         await client.initialize();
+        
+        // אם הגענו לכאן - אפס את מונה הניסיונות
+        initAttempts = 0;
 
     } catch (error) {
         console.error('❌ שגיאה באתחול:', error.message);
+        io.emit('error', { message: `שגיאה באתחול: ${error.message}` });
 
-        if (error.message && error.message.includes('already exists')) {
-            console.log('⚠️ בעיית binding - מנסה שוב...');
-
-            // נסה להרוס ולאתחל מחדש
+        // נסה להרוס את ה-client
+        if (client) {
             try {
-                if (client) await client.destroy();
+                await client.destroy();
             } catch (e) { }
+            client = null;
+        }
 
-            // המתן ונסה שוב
-            setTimeout(async () => {
-                try {
-                    client = createClient();
-                    setupClientEvents();
-                    await client.initialize();
-                } catch (e) {
-                    console.error('❌ נכשל שוב:', e.message);
-                }
-            }, 5000);
+        // אם לא הגענו למקסימום ניסיונות - נסה שוב
+        if (initAttempts < MAX_INIT_ATTEMPTS) {
+            const delay = initAttempts * 10000; // 10, 20, 30 שניות
+            console.log(`🔄 מנסה שוב בעוד ${delay/1000} שניות...`);
+            io.emit('log', { message: `מנסה שוב בעוד ${delay/1000} שניות...` });
+            setTimeout(() => initializeClient(), delay);
         } else {
-            // שגיאה אחרת - נסה שוב אחרי 10 שניות
-            console.log('🔄 מנסה שוב בעוד 10 שניות...');
-            setTimeout(() => initializeClient(), 10000);
+            console.error('❌ נכשלו כל ניסיונות האתחול!');
+            console.log('💡 נסה למחוק את תיקיית .wwebjs_auth ולהפעיל מחדש');
+            io.emit('error', { message: 'נכשלו כל ניסיונות האתחול. נסה להתנתק ולהתחבר מחדש.' });
+            
+            // אפס את המונה והמתן דקה לפני ניסיון נוסף
+            initAttempts = 0;
+            setTimeout(() => initializeClient(), 60000);
         }
     }
 }
