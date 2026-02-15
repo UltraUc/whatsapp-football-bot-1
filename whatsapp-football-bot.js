@@ -688,23 +688,21 @@ async function loadGroups(forceRefresh = false) {
     const now = Date.now();
 
     // === אופטימיזציה: החזר cache מיד אם יש ===
-    // אם יש cache (מקובץ או מזיכרון) - החזר אותו מיד
     if (!forceRefresh) {
         if (groupsCache && groupsCache.length > 0 && (now - lastGroupsLoad) < GROUPS_CACHE_TTL) {
             console.log('📦 מחזיר קבוצות מהמטמון (cache בתוקף)');
-            return groupsCache;
+            return limitGroups(groupsCache);
         }
         
         // נסה לטעון מקובץ אם אין cache בזיכרון
         if (!groupsCache || groupsCache.length === 0) {
             const savedGroups = loadGroupsFromFile();
             if (savedGroups && savedGroups.length > 0) {
-                console.log('📦 טוען קבוצות מקובץ cache');
                 groupsCache = savedGroups;
                 lastGroupsLoad = now;
                 // עדכן ברקע (לא חוסם)
                 setTimeout(() => loadGroupsFromWhatsApp(), 100);
-                return groupsCache;
+                return limitGroups(groupsCache);
             }
             
             // אם יש קבוצות נבחרות שמורות - השתמש בהן
@@ -719,6 +717,23 @@ async function loadGroups(forceRefresh = false) {
 
     // טען מ-WhatsApp
     return await loadGroupsFromWhatsApp();
+}
+
+// פונקציה להגבלת קבוצות: כל הנבחרות + 20 לא-נבחרות
+function limitGroups(groups) {
+    if (!groups || groups.length === 0) return [];
+    
+    // עדכן isSelected לפי config הנוכחי
+    const updated = groups.map(g => ({
+        ...g,
+        isSelected: config.selectedGroups.includes(g.id)
+    }));
+    
+    const selected = updated.filter(g => g.isSelected);
+    const unselected = updated.filter(g => !g.isSelected);
+    const limitedUnselected = unselected.slice(0, MAX_GROUPS_TO_LOAD);
+    
+    return [...selected, ...limitedUnselected];
 }
 
 // פונקציה נפרדת לטעינה מ-WhatsApp (איטית)
@@ -885,16 +900,30 @@ function getSavedSelectedGroups() {
     return saved;
 }
 
-// טעינת קבוצות מקובץ backup
+// טעינת קבוצות מקובץ backup - עם הגבלה ל-20 לא-נבחרות
 function loadGroupsFromFile() {
     try {
         const filePath = path.join(__dirname, '.groups_cache.json');
         if (fs.existsSync(filePath)) {
             const data = fs.readFileSync(filePath, 'utf8');
-            return JSON.parse(data);
+            const allGroups = JSON.parse(data);
+            
+            // הגבל: כל הנבחרות + 20 לא-נבחרות
+            const selected = allGroups.filter(g => g.isSelected || config.selectedGroups.includes(g.id));
+            const unselected = allGroups.filter(g => !g.isSelected && !config.selectedGroups.includes(g.id));
+            const limitedUnselected = unselected.slice(0, MAX_GROUPS_TO_LOAD);
+            
+            // עדכן isSelected לפי config
+            const result = [...selected, ...limitedUnselected].map(g => ({
+                ...g,
+                isSelected: config.selectedGroups.includes(g.id)
+            }));
+            
+            console.log(`📦 נטענו מקובץ: ${selected.length} נבחרות + ${limitedUnselected.length} אחרונות`);
+            return result;
         }
     } catch (e) {
-        // שקט
+        console.log('⚠️ שגיאה בטעינת cache:', e.message);
     }
     return null;
 }
@@ -932,14 +961,14 @@ app.get('/api/groups', async (req, res) => {
             // נסה להחזיר קבוצות מ-cache או מקובץ
             if (groupsCache && groupsCache.length > 0) {
                 console.log('📦 מחזיר קבוצות מ-cache (בוט בטעינה)');
-                return res.json(groupsCache);
+                return res.json(limitGroups(groupsCache));
             }
             
             const savedGroups = loadGroupsFromFile();
             if (savedGroups && savedGroups.length > 0) {
                 console.log('📦 מחזיר קבוצות מקובץ (בוט בטעינה)');
                 groupsCache = savedGroups;
-                return res.json(savedGroups);
+                return res.json(limitGroups(savedGroups));
             }
             
             const savedSelected = getSavedSelectedGroups();
@@ -948,12 +977,12 @@ app.get('/api/groups', async (req, res) => {
                 return res.json(savedSelected);
             }
             
-            // אין קבוצות שמורות - החזר רשימה ריקה עם הודעה
+            // אין קבוצות שמורות - החזר רשימה ריקה
             return res.json([]);
         }
 
         const groups = await loadGroups();
-        res.json(groups || []);
+        res.json(limitGroups(groups || []));
     } catch (error) {
         console.error('❌ שגיאה ב-/api/groups:', error);
         // גם במקרה של שגיאה - נסה להחזיר cache
