@@ -188,17 +188,22 @@ function setupClientEvents() {
     // מוכן
     client.on('ready', async () => {
         console.log('');
-        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
-        console.log('✅ הבוט מוכן לפעולה!');
-        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
+        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
+        console.log('');
+        console.log('     ✅✅✅ הבוט מוכן לפעולה! ✅✅✅');
+        console.log('');
+        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
         console.log('');
         
         // הצג את ההגדרות הנוכחיות
         console.log('📋 הגדרות נוכחיות:');
         console.log(`   - קבוצות נבחרות: ${config.selectedGroups.length}`);
+        if (config.selectedGroups.length > 0) {
+            console.log(`   - IDs: ${config.selectedGroups.join(', ')}`);
+        }
         console.log(`   - שחקנים: ${config.membersToAdd.join(', ')}`);
         console.log(`   - מילות מפתח: ${config.keywords.join(', ')}`);
-        console.log(`   - מצב טסט עצמי: ${config.selfTestMode ? 'מופעל' : 'כבוי'}`);
+        console.log(`   - מצב טסט עצמי: ${config.selfTestMode ? '✅ מופעל' : '❌ כבוי'}`);
         console.log(`   - דרוש אישור: ${config.requireConfirmation ? 'כן' : 'לא'}`);
         console.log('');
         
@@ -206,14 +211,19 @@ function setupClientEvents() {
         botStatus.isReady = true;
         botStatus.isAuthenticated = true;
         botStatus.qrCode = null;
-        reconnectAttempts = 0; // איפוס מונה ניסיונות חיבור מחדש
+        reconnectAttempts = 0;
         io.emit('status-update', botStatus);
         io.emit('log', { message: '✅ הבוט מחובר ומוכן!' });
 
-        // טען קבוצות ברקע (לא חוסם)
+        // טען קבוצות ברקע
         loadGroupsBackground();
         
-        console.log('👂 מחכה להודעות...');
+        console.log('');
+        console.log('════════════════════════════════════════════');
+        console.log('👂 הבוט מאזין להודעות...');
+        console.log('📝 שלח הודעה לקבוצה שבחרת כדי לבדוק');
+        console.log('════════════════════════════════════════════');
+        console.log('');
     });
 
     // אימות נכשל
@@ -269,23 +279,41 @@ function setupClientEvents() {
         io.emit('log', { message: `מצב WhatsApp: ${state}` });
     });
 
-    // הודעות נכנסות (מאחרים)
-    client.on('message', (message) => {
-        console.log('📩 [EVENT: message] הודעה התקבלה!');
+    // === הודעות - משתמשים ב-message_create כי זה יותר אמין ===
+    client.on('message_create', async (message) => {
+        // לוג לכל הודעה שמגיעה
+        console.log('\n');
+        console.log('═══════════════════════════════════════');
+        console.log('📩 [EVENT: message_create] הודעה התקבלה!');
+        console.log(`   📱 fromMe: ${message.fromMe}`);
+        console.log(`   📝 type: ${message.type}`);
+        console.log(`   🔤 body: ${message.body?.substring(0, 30) || '(ריק)'}...`);
+        console.log('═══════════════════════════════════════');
+        
+        // דלג על הודעות שלך (אלא אם מצב טסט מופעל)
+        if (message.fromMe && !config.selfTestMode) {
+            console.log('⏭️ דילוג על הודעה עצמית (מצב טסט כבוי)');
+            return;
+        }
+        
+        // דלג על הודעות שאינן טקסט
+        if (message.type !== 'chat') {
+            console.log(`⏭️ דילוג על הודעה מסוג: ${message.type}`);
+            return;
+        }
+        
+        // עבד את ההודעה
         handleMessage(message);
     });
 
-    // כל ההודעות (כולל שלך) - לטסטים
-    client.on('message_create', (message) => {
-        // רק אם זו הודעה שלך ומצב טסט מופעל
-        if (message.fromMe && config.selfTestMode) {
-            console.log('📩 [EVENT: message_create] הודעה עצמית בטסט!');
-            handleMessage(message);
-        }
+    // גם message לגיבוי (חלק מהגרסאות משתמשות בזה)
+    client.on('message', async (message) => {
+        console.log('📩 [EVENT: message] (backup event)');
     });
 
     // לוג שה-events הוגדרו
     console.log('✅ Event listeners הוגדרו בהצלחה');
+    console.log('👂 מחכה להודעות...');
 }
 
 // טעינת קבוצות ברקע ללא חסימה
@@ -1317,20 +1345,9 @@ io.on('connection', (socket) => {
 
 // ============ Message Handler Function ============
 async function handleMessage(message) {
-    // לוג מיידי - עוד לפני כל בדיקה
-    console.log('\n');
-    console.log('🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔');
-    console.log('📨 handleMessage נקרא!');
-    console.log(`⏰ זמן: ${new Date().toISOString()}`);
-    console.log(`📱 fromMe: ${message.fromMe}`);
-    console.log(`📝 body length: ${message.body?.length || 0}`);
-    console.log('🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔');
-    console.log('\n');
+    console.log('🔄 handleMessage - מתחיל עיבוד...');
     
     try {
-        // לוג ראשוני לכל הודעה שנכנסת
-        console.log('📨 === הודעה חדשה נכנסה ===');
-        console.log(`📄 תוכן: ${message.body?.substring(0, 50) || '(ריק)'}...`);
 
         const chat = await message.getChat();
         console.log(`💬 צ'אט: ${chat.name} | isGroup: ${chat.isGroup}`);
@@ -1371,14 +1388,7 @@ async function handleMessage(message) {
             return;
         }
 
-        // בודק אם זו הודעה מהמשתמש עצמו (טסט עצמי)
-        const isSelfMessage = message.fromMe;
-        console.log(`❓ האם הודעה עצמית? ${isSelfMessage ? 'כן' : 'לא'} | מצב טסט עצמי: ${config.selfTestMode}`);
-
-        if (isSelfMessage && !config.selfTestMode) {
-            console.log('❌ הודעה עצמית וטסט עצמי כבוי, מתעלם.');
-            return;
-        }
+        console.log('✅ הקבוצה נבחרה! ממשיך לבדוק את ההודעה...');
 
         const isFootball = isFootballList(message.body);
         console.log(`❓ האם זוהתה רשימת כדורגל? ${isFootball ? 'כן' : 'לא'}`);
@@ -1390,8 +1400,8 @@ async function handleMessage(message) {
         }
 
         console.log(`✅ הודעה תקינה! מתחיל עיבוד...`);
-        console.log(`\n📨 התקבלה הודעה בקבוצה: ${groupName}`);
-        console.log(`👤 מאת: ${fromName}${isSelfMessage ? ' (אתה - טסט עצמי)' : ''}`);
+        console.log(`📨 התקבלה הודעה בקבוצה: ${groupName}`);
+        console.log(`👤 מאת: ${fromName}`);
 
         io.emit('message-received', {
             groupId,
