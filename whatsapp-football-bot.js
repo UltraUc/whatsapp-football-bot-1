@@ -78,18 +78,24 @@ let messageStats = { total: 0, groups: 0, processed: 0, errors: 0 }; // סטטי
 // ============ יצירת הבוט ============
 let client = null;
 let isClientReady = false;
+let isInitializing = false; // נעילה למניעת אתחולים מקבילים
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 10000; // 10 שניות
 
-// מציאת נתיב Chromium אוטומטית (תומך Windows + Linux)
-function findChromiumPath() {
+// מציאת נתיב דפדפן (Chrome / Edge / Chromium) - תומך Windows + Linux
+function findBrowserPath() {
     const possiblePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH,
-        // Windows paths
+        // Windows - Google Chrome
         process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        // Windows - Microsoft Edge (חשוב! Edge מבוסס Chromium ועובד מצוין)
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        // Windows - Chromium
         process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Chromium', 'Application', 'chrome.exe'),
         // Linux paths
         '/usr/bin/chromium',
@@ -103,65 +109,49 @@ function findChromiumPath() {
     
     for (const p of possiblePaths) {
         if (p && fs.existsSync(p)) {
-            console.log(`✅ נמצא Chrome/Chromium: ${p}`);
+            console.log(`✅ נמצא דפדפן: ${p}`);
             return p;
         }
     }
     
-    console.log('⚠️ לא נמצא Chrome/Chromium חיצוני - משתמש ב-bundled Chromium של puppeteer');
-    return undefined; // יאפשר ל-puppeteer להשתמש ב-bundled chromium
+    console.log('⚠️ לא נמצא Chrome/Edge/Chromium - משתמש ב-bundled Chromium של puppeteer');
+    console.log('   💡 שים לב: ה-bundled Chromium עלול להיות ישן מדי עבור WhatsApp Web!');
+    console.log('   💡 מומלץ להתקין Google Chrome או Microsoft Edge');
+    return undefined;
 }
 
 function createClient() {
-    const chromiumPath = findChromiumPath();
+    const browserPath = findBrowserPath();
+    
+    if (!browserPath) {
+        console.log('⚠️ אין דפדפן מעודכן - הבוט עלול לא לעבוד תקין!');
+    }
     
     return new Client({
         authStrategy: new LocalAuth({
             dataPath: './.wwebjs_auth',
             clientId: 'whatsapp-bot'
         }),
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/nicaea/nicaea.github.io/refs/heads/main/nicaea/{version}',
+        },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         puppeteer: {
             headless: true,
-            executablePath: chromiumPath,
+            executablePath: browserPath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
                 '--disable-gpu',
-                '--disable-software-rasterizer',
                 '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--disable-translate',
+                '--no-first-run',
                 '--disable-default-apps',
-                '--mute-audio',
-                '--no-default-browser-check',
-                '--disable-hang-monitor',
-                '--disable-prompt-on-repost',
-                '--disable-client-side-phishing-detection',
-                '--disable-component-update',
-                '--disable-domain-reliability',
-                '--disable-features=AudioServiceOutOfProcess',
-                '--disable-print-preview',
-                '--disable-ipc-flooding-protection',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
-                '--force-color-profile=srgb',
-                '--hide-scrollbars',
-                '--metrics-recording-only',
-                '--safebrowsing-disable-auto-update',
-                '--password-store=basic',
-                '--use-mock-keychain',
-                '--export-tagged-pdf',
                 '--window-size=1920,1080'
             ],
-            timeout: 120000, // 2 דקות timeout
+            timeout: 120000,
             protocolTimeout: 120000
-        },
-        webVersionCache: {
-            type: 'local'
         }
     });
 }
@@ -180,21 +170,74 @@ function setupClientEvents() {
 
     // Loading screen - שלח עדכונים לדשבורד
     client.on('loading_screen', (percent, message) => {
-        console.log(`⏳ טוען: ${percent}% - ${message}`);
+        console.log(`⏳ טוען WhatsApp Web: ${percent}% - ${message}`);
         io.emit('loading-progress', { percent, message });
-        io.emit('log', { message: `טוען WhatsApp: ${percent}%` });
+        io.emit('log', { message: `טוען WhatsApp: ${percent}% - ${message}` });
+        
+        if (percent === 100) {
+            console.log('✅ טעינת WhatsApp Web הושלמה! ממתין ל-ready event...');
+        }
     });
 
     // אימות הצליח
+    let readyTimeout = null;
     client.on('authenticated', () => {
         console.log('🔐 אימות הצליח!');
+        console.log('⏳ ממתין ל-Store injection ו-ready event...');
         botStatus.isAuthenticated = true;
         botStatus.qrCode = null;
         io.emit('status-update', botStatus);
+        
+        // הוסף debug logging לדף הדפדפן
+        try {
+            if (client.pupPage) {
+                client.pupPage.on('console', (msg) => {
+                    if (msg.type() === 'error') {
+                        console.log(`🌐 [Browser Error]: ${msg.text()}`);
+                    }
+                });
+                client.pupPage.on('pageerror', (error) => {
+                    console.log(`🌐 [Page Error]: ${error.message}`);
+                });
+                console.log('🔍 Debug listeners attached to browser page');
+            }
+        } catch (e) {
+            console.log('⚠️ לא הצלחתי להוסיף debug listeners:', e.message);
+        }
+        
+        // הגדר timeout - אם ready לא מגיע תוך 2 דקות, נסה מחדש
+        if (readyTimeout) clearTimeout(readyTimeout);
+        readyTimeout = setTimeout(() => {
+            if (!botStatus.isReady) {
+                console.error('⏰ TIMEOUT: אימות הצליח אבל ready לא הגיע תוך 2 דקות!');
+                console.log('🔄 מנסה לאתחל מחדש...');
+                io.emit('log', { message: '⏰ הבוט נתקע אחרי אימות - מאתחל מחדש...' });
+                io.emit('error', { message: 'הבוט נתקע אחרי אימות. מנסה לאתחל מחדש...' });
+                
+                // נסה לאתחל מחדש
+                (async () => {
+                    try {
+                        if (client) await client.destroy();
+                    } catch (e) {
+                        console.log('⚠️ שגיאה בהריסת client:', e.message);
+                    }
+                    client = null;
+                    initAttempts = 0;
+                    isInitializing = false; // שחרר נעילה כדי לאפשר אתחול מחדש
+                    setTimeout(() => initializeClient(), 3000);
+                })();
+            }
+        }, 120000); // 2 דקות
     });
 
     // מוכן
     client.on('ready', async () => {
+        // נקה timeout
+        if (readyTimeout) {
+            clearTimeout(readyTimeout);
+            readyTimeout = null;
+        }
+        
         console.log('');
         console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
         console.log('');
@@ -282,29 +325,21 @@ function setupClientEvents() {
         isClientReady = false;
         io.emit('status-update', botStatus);
         
+        // אם כבר באמצע אתחול - אל תתערב
+        if (isInitializing) {
+            console.log('🔒 אתחול כבר רץ, מדלג על חיבור מחדש אוטומטי');
+            return;
+        }
+        
         // נסה להתחבר מחדש אוטומטית
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
             console.log(`🔄 מנסה להתחבר מחדש (ניסיון ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
             io.emit('log', { message: `מנסה להתחבר מחדש (ניסיון ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...` });
             
-            setTimeout(async () => {
-                try {
-                    // הרס את ה-client הישן
-                    try {
-                        await client.destroy();
-                    } catch (e) {
-                        console.log('⚠️ שגיאה בהריסת client (לא קריטי):', e.message);
-                    }
-                    
-                    // צור client חדש והתחבר
-                    client = createClient();
-                    setupClientEvents();
-                    await client.initialize();
-                } catch (error) {
-                    console.error('❌ שגיאה בחיבור מחדש:', error.message);
-                    io.emit('error', { message: 'שגיאה בחיבור מחדש: ' + error.message });
-                }
+            setTimeout(() => {
+                initAttempts = 0;
+                initializeClient();
             }, RECONNECT_DELAY);
         } else {
             console.error('❌ נכשלו כל ניסיונות החיבור מחדש');
@@ -1376,16 +1411,27 @@ app.post('/api/logout', async (req, res) => {
     try {
         console.log('🔄 מבצע logout מ-WhatsApp...');
 
+        // אם כבר באמצע אתחול - המתן
+        if (isInitializing) {
+            console.log('⚠️ אתחול בתהליך, ממתין...');
+            res.json({ success: true, message: 'אתחול בתהליך - ממתין...' });
+            return;
+        }
+
         // עדכן סטטוס קודם
         botStatus.isReady = false;
         botStatus.isAuthenticated = false;
+        isClientReady = false;
         io.emit('status-update', botStatus);
 
         // נסה לסגור ולהרוס את ה-client
-        try {
-            await client.destroy();
-        } catch (destroyError) {
-            console.log('⚠️ שגיאה ב-destroy (לא קריטי):', destroyError.message);
+        if (client) {
+            try {
+                await client.destroy();
+            } catch (destroyError) {
+                console.log('⚠️ שגיאה ב-destroy (לא קריטי):', destroyError.message);
+            }
+            client = null;
         }
 
         // מחק את תיקיית ה-auth כדי שיוצג QR חדש
@@ -1399,23 +1445,12 @@ app.post('/api/logout', async (req, res) => {
             console.log('⚠️ לא הצלחתי למחוק תיקיית auth:', rmError.message);
         }
 
-        // צור client חדש ואתחל
-        console.log('🔄 יוצר client חדש...');
-        client = createClient();
-        setupClientEvents();
-
-        // אתחל אחרי 2 שניות
-        setTimeout(async () => {
-            try {
-                console.log('📱 מאתחל client חדש...');
-                await client.initialize();
-            } catch (initError) {
-                console.error('❌ שגיאה באתחול:', initError.message);
-            }
-        }, 2000);
-
         console.log('✅ Logout הצליח - QR חדש יופיע בקרוב');
         res.json({ success: true, message: 'Logged out - QR code יופיע בקרוב' });
+
+        // אתחול מחדש אחרי 2 שניות
+        initAttempts = 0;
+        setTimeout(() => initializeClient(), 2000);
     } catch (error) {
         console.error('❌ שגיאה ב-logout:', error);
         res.status(500).json({ success: false, error: error.message });
@@ -1699,6 +1734,12 @@ let initAttempts = 0;
 const MAX_INIT_ATTEMPTS = 3;
 
 async function initializeClient() {
+    // נעילה - מניעת אתחולים מקבילים
+    if (isInitializing) {
+        console.log('🔒 אתחול כבר רץ, מדלג...');
+        return;
+    }
+    isInitializing = true;
     initAttempts++;
     
     try {
@@ -1731,8 +1772,16 @@ async function initializeClient() {
         initAttempts = 0;
 
     } catch (error) {
-        console.error('❌ שגיאה באתחול:', error.message);
-        io.emit('error', { message: `שגיאה באתחול: ${error.message}` });
+        const errMsg = typeof error === 'string' ? error : (error.message || String(error));
+        console.error('❌ שגיאה באתחול:', errMsg);
+        
+        // אם זה ready timeout - נותן מידע ברור
+        if (errMsg.includes('ready timeout')) {
+            console.error('⚠️ Store injection נכשל! WhatsApp Web לא תואם לגרסת הספרייה.');
+            console.error('💡 אפשרויות: נסה למחוק .wwebjs_auth + .wwebjs_cache ולנסות שוב');
+        }
+        
+        io.emit('error', { message: `שגיאה באתחול: ${errMsg}` });
 
         // נסה להרוס את ה-client
         if (client) {
@@ -1747,7 +1796,9 @@ async function initializeClient() {
             const delay = initAttempts * 10000; // 10, 20, 30 שניות
             console.log(`🔄 מנסה שוב בעוד ${delay/1000} שניות...`);
             io.emit('log', { message: `מנסה שוב בעוד ${delay/1000} שניות...` });
+            isInitializing = false; // שחרר נעילה לפני retry
             setTimeout(() => initializeClient(), delay);
+            return; // חשוב! לא לשחרר נעילה פעמיים
         } else {
             console.error('❌ נכשלו כל ניסיונות האתחול!');
             console.log('💡 נסה למחוק את תיקיית .wwebjs_auth ולהפעיל מחדש');
@@ -1755,9 +1806,13 @@ async function initializeClient() {
             
             // אפס את המונה והמתן דקה לפני ניסיון נוסף
             initAttempts = 0;
+            isInitializing = false; // שחרר נעילה לפני retry
             setTimeout(() => initializeClient(), 60000);
+            return; // חשוב! לא לשחרר נעילה פעמיים
         }
     }
+    
+    isInitializing = false; // שחרר נעילה אחרי הצלחה
 }
 
 // טיפול בסגירה נקייה של התהליך
