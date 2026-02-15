@@ -80,7 +80,33 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 10000; // 10 שניות
 
+// מציאת נתיב Chromium אוטומטית
+function findChromiumPath() {
+    const possiblePaths = [
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/snap/bin/chromium',
+        '/usr/lib/chromium/chromium',
+        '/usr/lib/chromium-browser/chromium-browser'
+    ];
+    
+    for (const p of possiblePaths) {
+        if (p && fs.existsSync(p)) {
+            console.log(`✅ נמצא Chromium: ${p}`);
+            return p;
+        }
+    }
+    
+    console.log('⚠️ לא נמצא Chromium - משתמש בברירת מחדל');
+    return undefined; // יאפשר ל-puppeteer להשתמש ב-bundled chromium
+}
+
 function createClient() {
+    const chromiumPath = findChromiumPath();
+    
     return new Client({
         authStrategy: new LocalAuth({
             dataPath: './.wwebjs_auth',
@@ -88,7 +114,7 @@ function createClient() {
         }),
         puppeteer: {
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
+            executablePath: chromiumPath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
