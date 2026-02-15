@@ -199,8 +199,14 @@ async function loadGroups(forceRefresh = false) {
         addLog(`✅ נטענו ${groups.length} קבוצות`);
     } catch (error) {
         console.error('Failed to load groups:', error);
-        addLog('❌ שגיאה בטעינת קבוצות', 'error');
-        listEl.innerHTML = '<p style="text-align: center; color: var(--text-muted);">הבוט עדיין לא מוכן. המתן לחיבור...</p>';
+        // Don't show error if bot is not ready yet - this is expected
+        listEl.innerHTML = `
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📱</div>
+                <p style="color: var(--text-muted); margin-bottom: 0.5rem;">הבוט עדיין לא מחובר ל-WhatsApp</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">סרוק את ה-QR code בדשבורד כדי להתחבר</p>
+            </div>
+        `;
     } finally {
         loadingEl.style.display = 'none';
         listEl.style.display = 'flex';
@@ -261,15 +267,38 @@ function loadSettings() {
 function renderGroups() {
     const listEl = document.getElementById('groupsList');
 
-    // הגבלה ל-10 קבוצות
-    const displayGroups = groups ? groups.slice(0, 10) : [];
-
-    if (displayGroups.length === 0) {
+    if (!groups || groups.length === 0) {
         listEl.innerHTML = '<p style="text-align: center; color: var(--text-muted);">לא נמצאו קבוצות</p>';
         return;
     }
 
-    listEl.innerHTML = displayGroups.map(group => `
+    // הפרד לנבחרות ולא נבחרות
+    const selectedGroups = groups.filter(g => g.isSelected);
+    const unselectedGroups = groups.filter(g => !g.isSelected);
+
+    let html = '';
+
+    // הצג קבוצות נבחרות קודם (עם כותרת)
+    if (selectedGroups.length > 0) {
+        html += `<div style="width: 100%; margin-bottom: 0.5rem;">
+            <span style="color: #22c55e; font-weight: 600; font-size: 0.9rem;">⭐ קבוצות פעילות (${selectedGroups.length})</span>
+        </div>`;
+        html += selectedGroups.map(group => renderGroupItem(group)).join('');
+    }
+
+    // הצג קבוצות לא נבחרות (עם כותרת)
+    if (unselectedGroups.length > 0) {
+        html += `<div style="width: 100%; margin: 1rem 0 0.5rem 0; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+            <span style="color: #94a3b8; font-weight: 600; font-size: 0.9rem;">📋 קבוצות אחרונות (${unselectedGroups.length})</span>
+        </div>`;
+        html += unselectedGroups.map(group => renderGroupItem(group)).join('');
+    }
+
+    listEl.innerHTML = html;
+}
+
+function renderGroupItem(group) {
+    return `
         <div class="group-item ${group.isSelected ? 'selected' : ''}" data-group-id="${group.id}">
             <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
                 <input type="checkbox" 
@@ -277,15 +306,16 @@ function renderGroups() {
                        ${group.isSelected ? 'checked' : ''} 
                        onchange="toggleGroup('${group.id}')">
                 <span class="group-name">${group.name || 'קבוצה ללא שם'}</span>
+                ${group.isSelected ? '<span style="color: #22c55e; font-size: 0.8rem;">✓ פעיל</span>' : ''}
             </div>
             ${group.isSelected ? `
                 <button class="btn btn-secondary btn-sm" onclick="manageGroupMembers('${group.id}', '${(group.name || '').replace(/'/g, "\\'")}')"
                         style="padding: 0.25rem 0.5rem; font-size: 0.85rem;">
-                    👥 רשימת שחקנים
+                    👥 שחקנים
                 </button>
             ` : ''}
         </div>
-    `).join('');
+    `;
 }
 
 function renderMembers() {

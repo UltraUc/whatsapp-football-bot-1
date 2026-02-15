@@ -569,11 +569,12 @@ async function sendResponse(chat, message, result) {
 
 /**
  * טעינת קבוצות (עם מטמון ואופטימיזציה)
- * מגביל ל-30 קבוצות אחרונות + כל הנבחרות
+ * מגביל ל-20 קבוצות אחרונות + כל הנבחרות (נשמרות לתמיד)
  * משתמש ב-timeout למניעת תקיעה
  */
 let lastGroupsLoad = 0;
 const GROUPS_CACHE_TTL = 60000; // 1 דקה cache
+const MAX_GROUPS_TO_LOAD = 20; // מקסימום קבוצות לטעינה
 
 async function loadGroups(forceRefresh = false) {
     const now = Date.now();
@@ -605,7 +606,7 @@ async function loadGroups(forceRefresh = false) {
     try {
         isLoadingGroups = true;
         const startTime = Date.now();
-        console.log('🔄 טוען קבוצות מ-WhatsApp...');
+        console.log('🔄 טוען קבוצות מ-WhatsApp (מקסימום 20)...');
 
         // timeout - נקבע בהגדרות (ברירת מחדל 60 שניות)
         const timeoutMs = (config.groupsLoadTimeout || 60) * 1000;
@@ -617,11 +618,11 @@ async function loadGroups(forceRefresh = false) {
         const chatsPromise = client.getChats();
         const chats = await Promise.race([chatsPromise, timeoutPromise]);
 
-        // סינון - רק קבוצות
-        const groups = [];
+        // סינון - רק קבוצות, ממוין לפי זמן
+        const allGroups = [];
         for (const chat of chats) {
             if (chat.isGroup && !chat.archived && chat.name) {
-                groups.push({
+                allGroups.push({
                     id: chat.id._serialized,
                     name: chat.name,
                     timestamp: chat.timestamp || 0,
@@ -630,29 +631,36 @@ async function loadGroups(forceRefresh = false) {
             }
         }
 
-        console.log(`📊 נמצאו ${groups.length} קבוצות ב-${Date.now() - startTime}ms`);
+        // מיין לפי זמן (החדשות קודם)
+        allGroups.sort((a, b) => b.timestamp - a.timestamp);
 
-        // הפרד לנבחרות ולא נבחרות
-        const selected = [];
-        const unselected = [];
-        for (const g of groups) {
-            if (g.isSelected) selected.push(g);
-            else unselected.push(g);
-        }
+        console.log(`📊 נמצאו ${allGroups.length} קבוצות ב-${Date.now() - startTime}ms`);
 
-        //  מיין ובחר 10 לא-נבחרות אחרונות
-        unselected.sort((a, b) => b.timestamp - a.timestamp);
-        const maxUnselected = Math.max(0, 10 - selected.length);
-        const limited = unselected.slice(0, maxUnselected);
-
-        // שלב - נבחרות קודם
-        groupsCache = [...selected, ...limited];
+        // === לוגיקה חדשה: קבוצות נבחרות נשמרות לתמיד ===
+        
+        // 1. קח את כל הקבוצות הנבחרות שנמצאו
+        const selectedFromWhatsApp = allGroups.filter(g => g.isSelected);
+        const selectedIds = new Set(selectedFromWhatsApp.map(g => g.id));
+        
+        // 2. הוסף קבוצות נבחרות שנשמרו אבל לא נמצאו ב-WhatsApp (למקרה שלא נטענו)
+        const savedSelected = getSavedSelectedGroups();
+        const missingSelected = savedSelected.filter(g => !selectedIds.has(g.id));
+        
+        // 3. שלב את כל הקבוצות הנבחרות
+        const allSelectedGroups = [...selectedFromWhatsApp, ...missingSelected];
+        
+        // 4. קח עד 20 קבוצות לא-נבחרות (הכי חדשות)
+        const unselectedGroups = allGroups.filter(g => !g.isSelected);
+        const recentUnselected = unselectedGroups.slice(0, MAX_GROUPS_TO_LOAD);
+        
+        // 5. שלב: נבחרות קודם, אחר כך 20 האחרונות
+        groupsCache = [...allSelectedGroups, ...recentUnselected];
         lastGroupsLoad = now;
 
         // שמור לקובץ כ-backup
         saveGroupsToFile(groupsCache);
 
-        console.log(`✅ טעינה הושלמה: ${selected.length} נבחרות + ${limited.length} אחרות`);
+        console.log(`✅ טעינה הושלמה: ${allSelectedGroups.length} נבחרות (נשמרות לתמיד) + ${recentUnselected.length} אחרונות`);
         return groupsCache;
     } catch (error) {
         console.error('❌ שגיאה בטעינת קבוצות:', error.message);
@@ -685,6 +693,49 @@ function saveGroupsToFile(groups) {
     } catch (e) {
         // שקט - לא קריטי
     }
+}
+
+// שמירת מידע על קבוצה נבחרת (שם + ID) - נשמר לתמיד
+function saveSelectedGroupInfo(groupId, groupName) {
+    if (!config.savedGroups) {
+        config.savedGroups = {};
+    }
+    config.savedGroups[groupId] = {
+        id: groupId,
+        name: groupName,
+        savedAt: Date.now()
+    };
+    saveConfig(config);
+}
+
+// הסרת מידע על קבוצה שבוטלה הבחירה שלה
+function removeSelectedGroupInfo(groupId) {
+    if (config.savedGroups && config.savedGroups[groupId]) {
+        delete config.savedGroups[groupId];
+        // מחק גם את רשימת השחקנים הספציפית
+        if (config.groupMembers && config.groupMembers[groupId]) {
+            delete config.groupMembers[groupId];
+        }
+        saveConfig(config);
+    }
+}
+
+// קבלת קבוצות נבחרות שנשמרו (גם אם לא נטענו מ-WhatsApp)
+function getSavedSelectedGroups() {
+    const saved = [];
+    if (config.savedGroups) {
+        for (const groupId of config.selectedGroups) {
+            if (config.savedGroups[groupId]) {
+                saved.push({
+                    id: groupId,
+                    name: config.savedGroups[groupId].name,
+                    timestamp: config.savedGroups[groupId].savedAt,
+                    isSelected: true
+                });
+            }
+        }
+    }
+    return saved;
 }
 
 // טעינת קבוצות מקובץ backup
@@ -752,6 +803,26 @@ app.post('/api/groups/selected', (req, res) => {
 
         if (!Array.isArray(selectedGroups)) {
             return res.status(400).json({ error: 'selectedGroups חייב להיות מערך' });
+        }
+
+        // מצא קבוצות שנוספו ושהוסרו
+        const previousSelected = config.selectedGroups || [];
+        const added = selectedGroups.filter(id => !previousSelected.includes(id));
+        const removed = previousSelected.filter(id => !selectedGroups.includes(id));
+
+        // שמור מידע על קבוצות חדשות שנבחרו
+        for (const groupId of added) {
+            const group = groupsCache?.find(g => g.id === groupId);
+            if (group) {
+                saveSelectedGroupInfo(groupId, group.name);
+                console.log(`⭐ קבוצה נשמרה: ${group.name}`);
+            }
+        }
+
+        // הסר מידע על קבוצות שבוטלה הבחירה שלהן
+        for (const groupId of removed) {
+            removeSelectedGroupInfo(groupId);
+            console.log(`🗑️ קבוצה הוסרה מהרשימה`);
         }
 
         config.selectedGroups = selectedGroups;
