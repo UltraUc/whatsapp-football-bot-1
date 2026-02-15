@@ -1,9 +1,13 @@
-# קבצים שלא צריך להעתיק ל-Docker
 node_modules
-npm-debug.log
+.wwebjs_auth
+.wwebjs_cache
+.groups_cache.json
+*.log
 .git
 .gitignore
 *.md
-.wwebjs_auth
-.wwebjs_cache
-
+!README.md
+.env.local
+.env.development
+.DS_Store
+Thumbs.db

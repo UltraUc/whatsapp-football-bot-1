@@ -76,6 +76,9 @@ let pendingConfirmations = new Map(); // אחסון בקשות אישור ממת
 // ============ יצירת הבוט ============
 let client = null;
 let isClientReady = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY = 10000; // 10 שניות
 
 function createClient() {
     return new Client({
@@ -93,14 +96,24 @@ function createClient() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
                 '--disable-gpu',
                 '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-sync',
+                '--disable-translate',
+                '--metrics-recording-only',
+                '--mute-audio',
+                '--no-default-browser-check',
+                '--safebrowsing-disable-auto-update'
             ],
-            timeout: 0 // ללא timeout
+            timeout: 60000 // 60 שניות timeout
+        },
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/AuYuRa/test1/main/AuYuRa.json'
         }
-        // ללא webVersionCache - משתמש בברירת מחדל
     });
 }
 
@@ -136,6 +149,7 @@ function setupClientEvents() {
         botStatus.isReady = true;
         botStatus.isAuthenticated = true;
         botStatus.qrCode = null;
+        reconnectAttempts = 0; // איפוס מונה ניסיונות חיבור מחדש
         io.emit('status-update', botStatus);
 
         // טען קבוצות ברקע (לא חוסם)
@@ -151,13 +165,48 @@ function setupClientEvents() {
         io.emit('status-update', botStatus);
     });
 
-    // התנתקות
-    client.on('disconnected', (reason) => {
+    // התנתקות - עם מנגנון חיבור מחדש אוטומטי
+    client.on('disconnected', async (reason) => {
         console.log('⚠️ התנתק:', reason);
         botStatus.isReady = false;
         botStatus.isAuthenticated = false;
         isClientReady = false;
         io.emit('status-update', botStatus);
+        
+        // נסה להתחבר מחדש אוטומטית
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            console.log(`🔄 מנסה להתחבר מחדש (ניסיון ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+            io.emit('log', { message: `מנסה להתחבר מחדש (ניסיון ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...` });
+            
+            setTimeout(async () => {
+                try {
+                    // הרס את ה-client הישן
+                    try {
+                        await client.destroy();
+                    } catch (e) {
+                        console.log('⚠️ שגיאה בהריסת client (לא קריטי):', e.message);
+                    }
+                    
+                    // צור client חדש והתחבר
+                    client = createClient();
+                    setupClientEvents();
+                    await client.initialize();
+                } catch (error) {
+                    console.error('❌ שגיאה בחיבור מחדש:', error.message);
+                    io.emit('error', { message: 'שגיאה בחיבור מחדש: ' + error.message });
+                }
+            }, RECONNECT_DELAY);
+        } else {
+            console.error('❌ נכשלו כל ניסיונות החיבור מחדש');
+            io.emit('error', { message: 'נכשלו כל ניסיונות החיבור מחדש. נא לרענן את הדף ולסרוק QR מחדש.' });
+        }
+    });
+    
+    // טיפול בשגיאות כלליות
+    client.on('change_state', (state) => {
+        console.log('📱 מצב WhatsApp השתנה:', state);
+        io.emit('log', { message: `מצב WhatsApp: ${state}` });
     });
 
     // הודעות
