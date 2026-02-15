@@ -207,25 +207,30 @@ async function loadGroups(forceRefresh = false) {
 
         console.log('📥 Response status:', response.status);
 
-        if (!response.ok) {
-            throw new Error('Failed to load groups');
+        const data = await response.json();
+        
+        // טיפול בפורמטים שונים של תגובה
+        if (forceRefresh) {
+            groups = data.groups || data || [];
+        } else {
+            groups = Array.isArray(data) ? data : (data.groups || []);
         }
 
-        const data = await response.json();
-        groups = forceRefresh ? data.groups : data;
-
-        console.log('📊 Loaded groups:', groups.length, groups);
+        console.log('📊 Loaded groups:', groups.length);
 
         renderGroups();
-        addLog(`✅ נטענו ${groups.length} קבוצות`);
+        
+        if (groups.length > 0) {
+            addLog(`✅ נטענו ${groups.length} קבוצות`);
+        }
     } catch (error) {
         console.error('Failed to load groups:', error);
-        // Don't show error if bot is not ready yet - this is expected
+        // הצג הודעה ידידותית
         listEl.innerHTML = `
             <div style="text-align: center; padding: 2rem;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">📱</div>
-                <p style="color: var(--text-muted); margin-bottom: 0.5rem;">הבוט עדיין לא מחובר ל-WhatsApp</p>
-                <p style="color: var(--text-muted); font-size: 0.9rem;">סרוק את ה-QR code בדשבורד כדי להתחבר</p>
+                <p style="color: var(--text-muted); margin-bottom: 0.5rem;">ממתין לחיבור...</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">אם סרקת QR, המתן מספר שניות</p>
             </div>
         `;
     } finally {

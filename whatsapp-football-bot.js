@@ -146,13 +146,19 @@ function setupClientEvents() {
 
     // מוכן
     client.on('ready', async () => {
+        console.log('');
+        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
         console.log('✅ הבוט מוכן לפעולה!');
+        console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
+        console.log('');
+        
         isClientReady = true;
         botStatus.isReady = true;
         botStatus.isAuthenticated = true;
         botStatus.qrCode = null;
         reconnectAttempts = 0; // איפוס מונה ניסיונות חיבור מחדש
         io.emit('status-update', botStatus);
+        io.emit('log', { message: '✅ הבוט מחובר ומוכן!' });
 
         // טען קבוצות ברקע (לא חוסם)
         loadGroupsBackground();
@@ -835,19 +841,40 @@ app.get('/api/status', (req, res) => {
 // קבלת כל הקבוצות
 app.get('/api/groups', async (req, res) => {
     try {
+        // אם הבוט לא מוכן, נסה להחזיר קבוצות שמורות
         if (!botStatus.isReady) {
-            return res.status(503).json({ error: 'הבוט עדיין לא מוכן' });
+            // נסה להחזיר קבוצות מ-cache או מקובץ
+            if (groupsCache && groupsCache.length > 0) {
+                console.log('📦 מחזיר קבוצות מ-cache (בוט בטעינה)');
+                return res.json(groupsCache);
+            }
+            
+            const savedGroups = loadGroupsFromFile();
+            if (savedGroups && savedGroups.length > 0) {
+                console.log('📦 מחזיר קבוצות מקובץ (בוט בטעינה)');
+                groupsCache = savedGroups;
+                return res.json(savedGroups);
+            }
+            
+            const savedSelected = getSavedSelectedGroups();
+            if (savedSelected.length > 0) {
+                console.log('📦 מחזיר קבוצות נבחרות שמורות (בוט בטעינה)');
+                return res.json(savedSelected);
+            }
+            
+            // אין קבוצות שמורות - החזר רשימה ריקה עם הודעה
+            return res.json([]);
         }
 
         const groups = await loadGroups();
-        if (!groups) {
-            return res.status(500).json({ error: 'שגיאה בטעינת קבוצות' });
-        }
-
-        res.json(groups);
+        res.json(groups || []);
     } catch (error) {
         console.error('❌ שגיאה ב-/api/groups:', error);
-        res.status(500).json({ error: error.message });
+        // גם במקרה של שגיאה - נסה להחזיר cache
+        if (groupsCache && groupsCache.length > 0) {
+            return res.json(groupsCache);
+        }
+        res.json([]);
     }
 });
 
@@ -1075,15 +1102,32 @@ app.post('/api/request-qr', async (req, res) => {
 // רענון קבוצות (מאלץ טעינה מחדש)
 app.post('/api/groups/refresh', async (req, res) => {
     try {
-        if (!botStatus.isReady) {
-            return res.status(503).json({ error: 'הבוט עדיין לא מוכן' });
+        // אם הבוט מוכן - טען מ-WhatsApp
+        if (botStatus.isReady) {
+            const groups = await loadGroups(true);
+            return res.json({ success: true, groups: groups || [] });
         }
-
-        const groups = await loadGroups(true);
-        res.json({ success: true, groups });
+        
+        // אם הבוט לא מוכן - החזר קבוצות שמורות
+        if (groupsCache && groupsCache.length > 0) {
+            return res.json({ success: true, groups: groupsCache, fromCache: true });
+        }
+        
+        const savedGroups = loadGroupsFromFile();
+        if (savedGroups && savedGroups.length > 0) {
+            groupsCache = savedGroups;
+            return res.json({ success: true, groups: savedGroups, fromCache: true });
+        }
+        
+        const savedSelected = getSavedSelectedGroups();
+        return res.json({ success: true, groups: savedSelected, fromCache: true });
     } catch (error) {
         console.error('❌ שגיאה ב-/api/groups/refresh:', error);
-        res.status(500).json({ error: error.message });
+        // גם במקרה של שגיאה - נסה להחזיר cache
+        if (groupsCache && groupsCache.length > 0) {
+            return res.json({ success: true, groups: groupsCache, fromCache: true });
+        }
+        res.json({ success: true, groups: [] });
     }
 });
 
