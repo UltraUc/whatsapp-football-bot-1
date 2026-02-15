@@ -72,6 +72,8 @@ let botStatus = {
 let groupsCache = null; // מטמון לקבוצות
 let isLoadingGroups = false;
 let pendingConfirmations = new Map(); // אחסון בקשות אישור ממתינות
+let processedMessages = new Set(); // מניעת עיבוד כפול של הודעות
+let messageStats = { total: 0, groups: 0, processed: 0, errors: 0 }; // סטטיסטיקות
 
 // ============ יצירת הבוט ============
 let client = null;
@@ -80,10 +82,16 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 10000; // 10 שניות
 
-// מציאת נתיב Chromium אוטומטית
+// מציאת נתיב Chromium אוטומטית (תומך Windows + Linux)
 function findChromiumPath() {
     const possiblePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH,
+        // Windows paths
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Chromium', 'Application', 'chrome.exe'),
+        // Linux paths
         '/usr/bin/chromium',
         '/usr/bin/chromium-browser',
         '/usr/bin/google-chrome',
@@ -95,12 +103,12 @@ function findChromiumPath() {
     
     for (const p of possiblePaths) {
         if (p && fs.existsSync(p)) {
-            console.log(`✅ נמצא Chromium: ${p}`);
+            console.log(`✅ נמצא Chrome/Chromium: ${p}`);
             return p;
         }
     }
     
-    console.log('⚠️ לא נמצא Chromium - משתמש בברירת מחדל');
+    console.log('⚠️ לא נמצא Chrome/Chromium חיצוני - משתמש ב-bundled Chromium של puppeteer');
     return undefined; // יאפשר ל-puppeteer להשתמש ב-bundled chromium
 }
 
@@ -199,7 +207,12 @@ function setupClientEvents() {
         console.log('📋 הגדרות נוכחיות:');
         console.log(`   - קבוצות נבחרות: ${config.selectedGroups.length}`);
         if (config.selectedGroups.length > 0) {
-            console.log(`   - IDs: ${config.selectedGroups.join(', ')}`);
+            config.selectedGroups.forEach((gId, idx) => {
+                const savedName = config.savedGroups?.[gId]?.name || '(שם לא ידוע)';
+                console.log(`   - [${idx+1}] ${savedName} => ${gId}`);
+            });
+        } else {
+            console.log('   ⚠️ אין קבוצות נבחרות! לך לדשבורד ובחר קבוצות');
         }
         console.log(`   - שחקנים: ${config.membersToAdd.join(', ')}`);
         console.log(`   - מילות מפתח: ${config.keywords.join(', ')}`);
@@ -215,15 +228,41 @@ function setupClientEvents() {
         io.emit('status-update', botStatus);
         io.emit('log', { message: '✅ הבוט מחובר ומוכן!' });
 
+        // בדיקת חיבור לקבוצות נבחרות
+        if (config.selectedGroups.length > 0) {
+            console.log('');
+            console.log('🔍 בודק חיבור לקבוצות נבחרות...');
+            for (const groupId of config.selectedGroups) {
+                try {
+                    const chat = await client.getChatById(groupId);
+                    if (chat) {
+                        console.log(`   ✅ מחובר לקבוצה: ${chat.name} (${groupId})`);
+                        // וודא שהקבוצה ב-cache
+                        addGroupFromMessage(groupId, chat.name);
+                    } else {
+                        console.log(`   ❌ לא מצליח למצוא קבוצה: ${groupId}`);
+                    }
+                } catch (err) {
+                    console.log(`   ❌ שגיאה בגישה לקבוצה ${groupId}: ${err.message}`);
+                }
+            }
+        }
+
         // טען קבוצות ברקע
         loadGroupsBackground();
         
         console.log('');
         console.log('════════════════════════════════════════════');
-        console.log('👂 הבוט מאזין להודעות...');
+        console.log('👂 הבוט מאזין להודעות (events: message + message_create)');
         console.log('📝 שלח הודעה לקבוצה שבחרת כדי לבדוק');
+        console.log(`🔑 קבוצות נבחרות: ${config.selectedGroups.join(', ') || '(אין - לך לדשבורד!)'}`);
         console.log('════════════════════════════════════════════');
         console.log('');
+        
+        // הפעל heartbeat log כל 60 שניות כדי לראות שהבוט חי
+        setInterval(() => {
+            console.log(`💓 [${new Date().toLocaleTimeString('he-IL')}] הבוט חי | הודעות: ${messageStats.total} | קבוצות: ${messageStats.groups} | עובדו: ${messageStats.processed} | שגיאות: ${messageStats.errors}`);
+        }, 60000);
     });
 
     // אימות נכשל
@@ -279,18 +318,55 @@ function setupClientEvents() {
         io.emit('log', { message: `מצב WhatsApp: ${state}` });
     });
 
-    // === הודעות - משתמשים ב-message_create כי זה יותר אמין ===
-    client.on('message_create', async (message) => {
-        // לוג לכל הודעה שמגיעה
+    // === הודעות - משתמשים בשני events עם deduplication לכיסוי מקסימלי ===
+    
+    // פונקציה פנימית לעיבוד הודעה עם deduplication
+    function processIncomingMessage(message, eventName) {
+        const msgId = message.id?._serialized || message.id?.id || `${message.from}_${Date.now()}`;
+        
+        messageStats.total++;
+        
         console.log('\n');
         console.log('═══════════════════════════════════════');
-        console.log('📩 [EVENT: message_create] הודעה התקבלה!');
+        console.log(`📩 [EVENT: ${eventName}] הודעה התקבלה!`);
+        console.log(`   🆔 ID: ${msgId}`);
+        console.log(`   📱 from: ${message.from}`);
         console.log(`   📱 fromMe: ${message.fromMe}`);
         console.log(`   📝 type: ${message.type}`);
-        console.log(`   🔤 body: ${message.body?.substring(0, 30) || '(ריק)'}...`);
+        console.log(`   🔤 body: "${message.body?.substring(0, 50) || '(ריק)'}"${message.body?.length > 50 ? '...' : ''}`);
+        console.log(`   👥 isGroupMsg: ${message.from?.endsWith('@g.us') ? 'כן ✅' : 'לא ❌'}`);
+        console.log(`   📊 סה"כ הודעות: ${messageStats.total} | קבוצות: ${messageStats.groups} | עובדו: ${messageStats.processed}`);
         console.log('═══════════════════════════════════════');
         
-        // דלג על הודעות שלך (אלא אם מצב טסט מופעל)
+        // בדיקת deduplication
+        if (processedMessages.has(msgId)) {
+            console.log(`⏭️ הודעה ${msgId} כבר עובדה (${eventName}), מדלג`);
+            return;
+        }
+        processedMessages.add(msgId);
+        
+        // ניקוי ה-Set כל 200 הודעות למניעת דליפת זיכרון
+        if (processedMessages.size > 200) {
+            const arr = Array.from(processedMessages);
+            arr.slice(0, 100).forEach(id => processedMessages.delete(id));
+            console.log('🧹 נוקו הודעות ישנות מה-dedup cache');
+        }
+        
+        // בדיקה אם זו הודעה מקבוצה
+        if (message.from?.endsWith('@g.us')) {
+            messageStats.groups++;
+            console.log(`👥 הודעת קבוצה! (from: ${message.from})`);
+            
+            // בדוק אם הקבוצה ברשימה הנבחרת
+            if (config.selectedGroups.includes(message.from)) {
+                console.log(`⭐ הקבוצה ${message.from} נמצאת ברשימה הנבחרת!`);
+            } else {
+                console.log(`ℹ️ הקבוצה ${message.from} לא ברשימה הנבחרת`);
+                console.log(`   📋 קבוצות נבחרות: ${config.selectedGroups.join(', ') || '(אין)'}`);
+            }
+        }
+        
+        // דלג על הודעות עצמיות (אלא אם מצב טסט מופעל)
         if (message.fromMe && !config.selfTestMode) {
             console.log('⏭️ דילוג על הודעה עצמית (מצב טסט כבוי)');
             return;
@@ -303,16 +379,46 @@ function setupClientEvents() {
         }
         
         // עבד את ההודעה
+        messageStats.processed++;
         handleMessage(message);
+    }
+    
+    // Event ראשי - message - מקבל הודעות נכנסות
+    client.on('message', async (message) => {
+        try {
+            processIncomingMessage(message, 'message');
+        } catch (err) {
+            messageStats.errors++;
+            console.error('❌ שגיאה ב-message event:', err.message);
+        }
     });
 
-    // גם message לגיבוי (חלק מהגרסאות משתמשות בזה)
-    client.on('message', async (message) => {
-        console.log('📩 [EVENT: message] (backup event)');
+    // Event משני - message_create - תופס גם הודעות שלא נתפסו ב-message
+    client.on('message_create', async (message) => {
+        try {
+            // אם זו הודעה עצמית במצב טסט - עבד אותה
+            if (message.fromMe && config.selfTestMode) {
+                processIncomingMessage(message, 'message_create:self');
+                return;
+            }
+            
+            // אם זו לא הודעה עצמית - נסה לעבד (deduplication ימנע כפילות עם message event)
+            if (!message.fromMe) {
+                processIncomingMessage(message, 'message_create:backup');
+            }
+        } catch (err) {
+            messageStats.errors++;
+            console.error('❌ שגיאה ב-message_create event:', err.message);
+        }
+    });
+    
+    // Event נוסף - group_join - כשמישהו נכנס לקבוצה
+    client.on('group_join', (notification) => {
+        console.log(`👋 מישהו הצטרף לקבוצה: ${notification.chatId}`);
     });
 
     // לוג שה-events הוגדרו
-    console.log('✅ Event listeners הוגדרו בהצלחה');
+    console.log('✅ Event listeners הוגדרו בהצלחה (message + message_create + deduplication)');
     console.log('👂 מחכה להודעות...');
 }
 
@@ -787,15 +893,25 @@ async function loadGroupsFromWhatsApp() {
             setTimeout(() => reject(new Error('Timeout בטעינת קבוצות')), timeoutMs)
         );
 
+        console.log('   ⏳ קורא client.getChats()...');
         const chatsPromise = client.getChats();
         const chats = await Promise.race([chatsPromise, timeoutPromise]);
+        
+        console.log(`   📊 getChats() החזיר ${chats?.length || 0} צ'אטים`);
 
         // סינון מהיר - רק קבוצות
         const allGroups = [];
         let count = 0;
+        let totalGroups = 0;
+        let archivedGroups = 0;
+        let noNameGroups = 0;
+        
         for (const chat of chats) {
-            // עצור אחרי 50 קבוצות לא-נבחרות (אופטימיזציה)
-            if (chat.isGroup && !chat.archived && chat.name) {
+            if (chat.isGroup) {
+                totalGroups++;
+                if (chat.archived) { archivedGroups++; continue; }
+                if (!chat.name) { noNameGroups++; continue; }
+                
                 const isSelected = config.selectedGroups.includes(chat.id._serialized);
                 if (!isSelected) count++;
                 
@@ -810,6 +926,8 @@ async function loadGroupsFromWhatsApp() {
                 });
             }
         }
+        
+        console.log(`   📊 סיכום סינון: ${totalGroups} קבוצות סה"כ, ${archivedGroups} בארכיון, ${noNameGroups} ללא שם, ${allGroups.length} תקינות`);
 
         // מיין לפי זמן (החדשות קודם)
         allGroups.sort((a, b) => b.timestamp - a.timestamp);
@@ -979,6 +1097,86 @@ function addGroupFromMessage(groupId, groupName) {
 // סטטוס הבוט
 app.get('/api/status', (req, res) => {
     res.json(botStatus);
+});
+
+// דיאגנוסטיקה - לבדיקת תקינות
+app.get('/api/diagnostics', async (req, res) => {
+    try {
+        const diagnostics = {
+            botStatus,
+            messageStats,
+            config: {
+                selectedGroups: config.selectedGroups,
+                keywords: config.keywords,
+                selfTestMode: config.selfTestMode,
+                membersToAdd: config.membersToAdd,
+                requireConfirmation: config.requireConfirmation
+            },
+            cache: {
+                groupsCacheSize: groupsCache?.length || 0,
+                processedMessagesSize: processedMessages.size,
+                pendingConfirmationsSize: pendingConfirmations.size
+            },
+            timestamp: new Date().toISOString()
+        };
+        
+        // בדוק חיבור לקבוצות אם הבוט מוכן
+        if (botStatus.isReady && client) {
+            diagnostics.groupsCheck = [];
+            for (const groupId of config.selectedGroups) {
+                try {
+                    const chat = await client.getChatById(groupId);
+                    diagnostics.groupsCheck.push({
+                        id: groupId,
+                        name: chat?.name || 'לא ידוע',
+                        found: !!chat,
+                        isGroup: chat?.isGroup || false
+                    });
+                } catch (err) {
+                    diagnostics.groupsCheck.push({
+                        id: groupId,
+                        error: err.message,
+                        found: false
+                    });
+                }
+            }
+        }
+        
+        res.json(diagnostics);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// בדיקת הודעות - שולח הודעת טסט לקבוצה
+app.post('/api/test-message', async (req, res) => {
+    try {
+        if (!botStatus.isReady) {
+            return res.status(400).json({ error: 'הבוט לא מוכן' });
+        }
+        
+        const { groupId } = req.body;
+        const targetGroup = groupId || config.selectedGroups[0];
+        
+        if (!targetGroup) {
+            return res.status(400).json({ error: 'לא נבחרה קבוצה' });
+        }
+        
+        console.log(`🧪 שולח הודעת טסט לקבוצה: ${targetGroup}`);
+        const chat = await client.getChatById(targetGroup);
+        
+        if (!chat) {
+            return res.status(404).json({ error: 'הקבוצה לא נמצאה' });
+        }
+        
+        await chat.sendMessage(`🧪 בדיקת בוט - ${new Date().toLocaleTimeString('he-IL')}`);
+        console.log(`✅ הודעת טסט נשלחה לקבוצה: ${chat.name}`);
+        
+        res.json({ success: true, groupName: chat.name });
+    } catch (error) {
+        console.error('❌ שגיאה בשליחת הודעת טסט:', error.message);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // קבלת כל הקבוצות
@@ -1346,11 +1544,14 @@ io.on('connection', (socket) => {
 // ============ Message Handler Function ============
 async function handleMessage(message) {
     console.log('🔄 handleMessage - מתחיל עיבוד...');
+    console.log(`   📱 message.from: ${message.from}`);
+    console.log(`   📱 message.to: ${message.to}`);
+    console.log(`   📱 message.author: ${message.author || '(אין)'}`);
     
     try {
-
+        console.log('   ⏳ קורא getChat()...');
         const chat = await message.getChat();
-        console.log(`💬 צ'אט: ${chat.name} | isGroup: ${chat.isGroup}`);
+        console.log(`💬 צ'אט: ${chat.name} | isGroup: ${chat.isGroup} | id: ${chat.id?._serialized}`);
 
         if (!chat.isGroup) {
             console.log('❌ ההודעה אינה מקבוצה, מדלג.');
