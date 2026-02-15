@@ -193,6 +193,15 @@ function setupClientEvents() {
         console.log('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉');
         console.log('');
         
+        // הצג את ההגדרות הנוכחיות
+        console.log('📋 הגדרות נוכחיות:');
+        console.log(`   - קבוצות נבחרות: ${config.selectedGroups.length}`);
+        console.log(`   - שחקנים: ${config.membersToAdd.join(', ')}`);
+        console.log(`   - מילות מפתח: ${config.keywords.join(', ')}`);
+        console.log(`   - מצב טסט עצמי: ${config.selfTestMode ? 'מופעל' : 'כבוי'}`);
+        console.log(`   - דרוש אישור: ${config.requireConfirmation ? 'כן' : 'לא'}`);
+        console.log('');
+        
         isClientReady = true;
         botStatus.isReady = true;
         botStatus.isAuthenticated = true;
@@ -203,6 +212,8 @@ function setupClientEvents() {
 
         // טען קבוצות ברקע (לא חוסם)
         loadGroupsBackground();
+        
+        console.log('👂 מחכה להודעות...');
     });
 
     // אימות נכשל
@@ -258,8 +269,23 @@ function setupClientEvents() {
         io.emit('log', { message: `מצב WhatsApp: ${state}` });
     });
 
-    // הודעות
-    client.on('message', handleMessage);
+    // הודעות נכנסות (מאחרים)
+    client.on('message', (message) => {
+        console.log('📩 [EVENT: message] הודעה התקבלה!');
+        handleMessage(message);
+    });
+
+    // כל ההודעות (כולל שלך) - לטסטים
+    client.on('message_create', (message) => {
+        // רק אם זו הודעה שלך ומצב טסט מופעל
+        if (message.fromMe && config.selfTestMode) {
+            console.log('📩 [EVENT: message_create] הודעה עצמית בטסט!');
+            handleMessage(message);
+        }
+    });
+
+    // לוג שה-events הוגדרו
+    console.log('✅ Event listeners הוגדרו בהצלחה');
 }
 
 // טעינת קבוצות ברקע ללא חסימה
@@ -1262,10 +1288,20 @@ io.on('connection', (socket) => {
 
 // ============ Message Handler Function ============
 async function handleMessage(message) {
+    // לוג מיידי - עוד לפני כל בדיקה
+    console.log('\n');
+    console.log('🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔');
+    console.log('📨 handleMessage נקרא!');
+    console.log(`⏰ זמן: ${new Date().toISOString()}`);
+    console.log(`📱 fromMe: ${message.fromMe}`);
+    console.log(`📝 body length: ${message.body?.length || 0}`);
+    console.log('🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔🔔');
+    console.log('\n');
+    
     try {
         // לוג ראשוני לכל הודעה שנכנסת
-        console.log('\n📨 === הודעה חדשה נכנסה ===');
-        console.log(`📄 תוכן: ${message.body.substring(0, 50)}...`);
+        console.log('📨 === הודעה חדשה נכנסה ===');
+        console.log(`📄 תוכן: ${message.body?.substring(0, 50) || '(ריק)'}...`);
 
         const chat = await message.getChat();
         console.log(`💬 צ'אט: ${chat.name} | isGroup: ${chat.isGroup}`);
