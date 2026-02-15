@@ -309,6 +309,19 @@ function isFootballList(message) {
 }
 
 /**
+ * מנקה תווים מיוחדים מהטקסט
+ * כולל: zero-width space, invisible characters, וכו'
+ */
+function cleanSpecialChars(text) {
+    return text
+        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '') // zero-width characters
+        .replace(/[\u00A0]/g, ' ') // non-breaking space to regular space
+        .replace(/\s+$/, '') // trailing whitespace
+        .replace(/^\s+/, '') // leading whitespace
+        .trim();
+}
+
+/**
  * מנתח את הרשימה ומוצא מקומות פנויים ברשימה הראשית וברשימת ממתינים
  * גם מזהה שמות שכבר נמצאים ברשימה
  * תומך ברשימות חלקיות - משלים את המספרים החסרים
@@ -326,7 +339,9 @@ function parseList(text) {
     let maxNumberFound = 0; // המספר הגבוה ביותר שנמצא ברשימה
 
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+        // נקה תווים מיוחדים מהשורה
+        const originalLine = lines[i];
+        const line = cleanSpecialChars(originalLine);
 
         // מזהה מתי מתחילה רשימת ממתינים
         if (line.includes('ממתינים')) {
@@ -335,11 +350,13 @@ function parseList(text) {
             continue;
         }
 
-        // Regex גמיש יותר - מאפשר רווחים לפני/אחרי המספר והנקודה
-        // מטפל גם בתווים מיוחדים כמו zero-width space
-        const match = line.match(/^\s*(\d+)\s*\.\s*$/);
-        if (match) {
-            const slotNumber = parseInt(match[1]);
+        // Regex גמיש - מזהה מספר עם נקודה (עם או בלי רווחים)
+        // תומך בפורמטים: "11." "11. " "11 ." " 11." וכו'
+        const emptySlotMatch = line.match(/^\s*(\d+)\s*\.\s*$/);
+        
+        if (emptySlotMatch) {
+            const slotNumber = parseInt(emptySlotMatch[1]);
+            console.log(`🔍 נמצא מקום פנוי: ${slotNumber} (שורה ${i + 1})`);
 
             if (!inWaitlist) {
                 // רשימה ראשית (1-15)
@@ -356,7 +373,7 @@ function parseList(text) {
             const nameMatch = line.match(/^\s*(\d+)\s*\.\s*(.+)$/);
             if (nameMatch) {
                 const slotNumber = parseInt(nameMatch[1]);
-                const name = nameMatch[2].trim();
+                const name = cleanSpecialChars(nameMatch[2]);
 
                 if (!inWaitlist) {
                     // רשימה ראשית (1-15)
@@ -380,6 +397,8 @@ function parseList(text) {
             }
         }
     }
+
+    console.log(`📊 סיכום ניתוח: ${emptySlots.length} מקומות פנויים ברשימה, ${waitlistSlots.length} בממתינים`);
 
     return {
         lines,
@@ -1298,6 +1317,7 @@ async function handleMessage(message) {
 
         const isFootball = isFootballList(message.body);
         console.log(`❓ האם זוהתה רשימת כדורגל? ${isFootball ? 'כן' : 'לא'}`);
+        console.log(`📝 מילות מפתח מוגדרות: ${config.keywords.join(', ')}`);
 
         if (!isFootball) {
             console.log('❌ לא זוהתה רשימת כדורגל (מילות מפתח חסרות).');
@@ -1315,6 +1335,12 @@ async function handleMessage(message) {
             message: message.body.substring(0, 100) + '...',
             fullMessage: message.body
         });
+
+        // הצג את רשימת השחקנים שמנסים להוסיף
+        const membersSource = (config.groupMembers && config.groupMembers[groupId]) 
+            ? config.groupMembers[groupId] 
+            : config.membersToAdd;
+        console.log(`👥 שחקנים להוספה: ${membersSource ? membersSource.join(', ') : 'לא הוגדרו'}`);
 
         const result = fillEmptySlots(message.body, groupId);
         console.log(`📊 תוצאת עיבוד רשימה: ${result ? 'נמצאו מקומות ומולאו' : 'לא בוצע שינוי'}`);
